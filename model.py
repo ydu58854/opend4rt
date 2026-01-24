@@ -57,7 +57,8 @@ class D4RT(nn.Module):
         cos_attn=False,
         embed_freqs = 10.0,
         embed_include_uv = False,
-        patch_mlp_ratio = 4.
+        patch_mlp_ratio = 4.,
+        img_patch_sizes = (3,6,9,12,15)
     ):
         super().__init__()
         self.encoder = D4RTEncoder(
@@ -104,6 +105,7 @@ class D4RT(nn.Module):
             image_in_chans = encoder_in_chans,          # images 的 C
             patch_mlp_ratio = patch_mlp_ratio,
             out_mlp_ratio = mlp_ratio,
+            img_patch_sizes = img_patch_sizes,
         )
 
 
@@ -128,9 +130,9 @@ class D4RT(nn.Module):
     def no_weight_decay(self):
         return {'pos_embed', 'register_token'}
 
-    def forward(self, images, query, meta):
+    def forward(self, meta, images, query):
         global_scene_rep = self.encoder(images, meta) # [B, Nc, C1]
-        query = self.query_embed(query,images)  # [B, Nq, C2]
+        query = self.query_embed(meta, query,images )  # [B, Nq, C2]
         predictions = self.decoder(query,global_scene_rep)
 
         return predictions

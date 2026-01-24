@@ -143,9 +143,9 @@ class D4RTEncoder(nn.Module):
         return {'pos_embed','register_token'}         #去掉了cls token
 
 
-    def forward(self, images, meta):
+    def forward(self, meta, images):
         #images : [B, C, T, H, W]
-        images_tokens = self.patch_embed(images)
+        images_tokens = self.patch_embed(images,img_patch_size = 9)
         B, S, P, C = images_tokens.shape   #我修改了patch_embed的接口，这里没有问题
         # [B, S, P, embed_dim]
         images_tokens = images_tokens.reshape(B, S*P ,C)

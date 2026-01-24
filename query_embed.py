@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
 import math
+import torch.nn.functional as F
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 from timm.models.registry import register_model
 from .modules import (
@@ -43,11 +44,10 @@ class QueryEmbedding(nn.Module):
         num_freqs: int = 10,      # Fourier 频带数量
         include_uv: bool = False,
         dropout: float = 0.0,
-
-        # token5 相关
         image_in_chans: int = 3,          # images 的 C
         patch_mlp_ratio: int = 4,
         out_mlp_ratio : int = 4,
+        img_patch_sizes = (3,6,9,12,15),
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -55,7 +55,20 @@ class QueryEmbedding(nn.Module):
         self.num_freqs = num_freqs
         self.include_uv = include_uv
         self.image_in_chans = image_in_chans
-
+        self.img_patch_sizes = tuple(img_patch_sizes)
+        self.patch_mlps = nn.ModuleDict()
+            
+        for k in self.img_patch_sizes:
+            in_dim = image_in_chans * (k * k)
+            hidden = int(in_dim * patch_mlp_ratio)
+            self.patch_mlps[str(k)] = nn.Sequential(
+                nn.Linear(in_dim, hidden),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, embed_dim),
+                nn.Dropout(dropout),
+            )        
+        
         # Fourier 频带：1,2,4,...
         freq_bands = 2.0 ** torch.arange(num_freqs, dtype=torch.float32)
         self.register_buffer("freq_bands", freq_bands, persistent=False)
@@ -75,17 +88,7 @@ class QueryEmbedding(nn.Module):
         self.t_tgt_emb = nn.Embedding(num_frames, embed_dim)
         self.t_cam_emb = nn.Embedding(num_frames, embed_dim)
 
-        # token5: 3x3 patch -> MLP -> embed_dim
-        in_dim = image_in_chans * 9
-        patch_mlp_hidden = in_dim * patch_mlp_ratio  
         out_mlp_hidden = embed_dim * out_mlp_ratio
-        self.patch_mlp = nn.Sequential(
-            nn.Linear(in_dim, patch_mlp_hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(patch_mlp_hidden, embed_dim),
-            nn.Dropout(dropout),
-        )
         self.out_mlp = nn.Sequential(
             nn.Linear(embed_dim, out_mlp_hidden),
             nn.GELU(),
@@ -109,12 +112,13 @@ class QueryEmbedding(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-        if self.patch_mlp is not None:
-            for m in self.patch_mlp.modules():
+        for mlp in self.patch_mlps.values():
+            for m in mlp.modules():
                 if isinstance(m, nn.Linear):
                     nn.init.xavier_uniform_(m.weight)
                     if m.bias is not None:
                         nn.init.zeros_(m.bias)
+
 
         if self.out_mlp is not None:
             for m in self.out_mlp.modules():
@@ -144,71 +148,86 @@ class QueryEmbedding(nn.Module):
         return feat
 
     @staticmethod
-    def _extract_3x3_patches(images: torch.Tensor,
-                            t_src: torch.Tensor,
-                            uv: torch.Tensor) -> torch.Tensor:
+    def _extract_kxk_patches_grid_sample(
+        images: torch.Tensor,   # (B, T, C, H, W)
+        t_src: torch.Tensor,    # (B, N) long
+        uv: torch.Tensor,       # (B, N, 2) float in [0,1]
+        img_patch_size: int = 3,    # k
+        mode: str = "bilinear",
+        padding_mode: str = "border",
+        align_corners: bool = True,
+    ) -> torch.Tensor:
         """
-        images: (B, T, C, H, W)
-        t_src:  (B, N) long in [0,T-1]
-        uv:     (B, N, 2) float in [0,1]
-        return: patches (B, N, C, 3, 3)  (中心为 uv 对应的离散像素)
+        return: patches (B, N, C, k, k), 可导到 uv
+        支持 k=3/6/9/12（或任意正整数）
         """
         B, T, C, H, W = images.shape
         B2, N = t_src.shape
         assert B2 == B
+        assert img_patch_size > 0
 
-        # uv -> 像素坐标（离散）
-        u = uv[..., 0].clamp(0.0, 1.0)  # (B,N)
+        # 1) 逐 query 取对应帧: frames (B,N,C,H,W) -> (BN,C,H,W)
+        b_idx = torch.arange(B, device=images.device).view(B, 1).expand(B, N)
+        frames = images[b_idx, t_src]                      # (B,N,C,H,W)
+        frames_bn = frames.reshape(B * N, C, H, W)         # (BN,C,H,W)
+
+        # 2) 构造 k×k 像素偏移（允许偶数 -> 半像素偏移）
+        # offsets in pixel units, centered at 0
+        k = img_patch_size
+        offs = torch.arange(k, device=images.device, dtype=torch.float32) - (k - 1) / 2.0
+        yy, xx = torch.meshgrid(offs, offs, indexing="ij")            # (k,k)
+        offsets = torch.stack([xx, yy], dim=-1).reshape(1, 1, k, k, 2)  # (1,1,k,k,2)
+
+        # 3) uv -> pixel coords (float, 不 round)
+        u = uv[..., 0].clamp(0.0, 1.0)
         v = uv[..., 1].clamp(0.0, 1.0)
+        x_pix = u * (W - 1)
+        y_pix = v * (H - 1)
 
-        # 映射到 [0, W-1], [0, H-1]
-        x = (u * (W - 1)).round().long()  # (B,N)
-        y = (v * (H - 1)).round().long()
+        center = torch.stack([x_pix, y_pix], dim=-1).unsqueeze(2).unsqueeze(3)  # (B,N,1,1,2)
+        grid_pix = center + offsets                                             # (B,N,k,k,2)
 
-        # 取 3x3 offsets
-        dx = torch.tensor([-1, 0, 1], device=images.device, dtype=torch.long)
-        dy = torch.tensor([-1, 0, 1], device=images.device, dtype=torch.long)
+        # 4) pixel coords -> [-1,1] grid
+        if align_corners:
+            gx = 2.0 * grid_pix[..., 0] / (W - 1) - 1.0
+            gy = 2.0 * grid_pix[..., 1] / (H - 1) - 1.0
+        else:
+            gx = (2.0 * grid_pix[..., 0] + 1.0) / W - 1.0
+            gy = (2.0 * grid_pix[..., 1] + 1.0) / H - 1.0
 
-        # (B,N,3)
-        x_idx = (x.unsqueeze(-1) + dx.view(1, 1, 3)).clamp(0, W - 1)
-        y_idx = (y.unsqueeze(-1) + dy.view(1, 1, 3)).clamp(0, H - 1)
+        grid = torch.stack([gx, gy], dim=-1)                  # (B,N,k,k,2)
+        grid_bn = grid.reshape(B * N, k, k, 2)                # (BN,k,k,2)
 
-        # 先选出每个 query 对应的帧：frames (B,N,C,H,W)
-        # 用高级索引实现逐 query 选帧
-        b_idx = torch.arange(B, device=images.device).view(B, 1).expand(B, N)  # (B,N)
-        frames = images[b_idx, t_src]  # (B,N,C,H,W)
-
-        # 抠 patch：
-        # 先在 H 维取 3 行 -> (B,N,C,3,W)
-        frames_flat = frames.reshape(B * N, C, H, W)         # (BN,C,H,W)
-        y_flat = y_idx.reshape(B * N, 3)                     # (BN,3)
-        x_flat = x_idx.reshape(B * N, 3)                     # (BN,3)
-
-        bn = B * N
-        bn_idx = torch.arange(bn, device=images.device)
-
-        # rows: (BN, C, 3, W)
-        rows = frames_flat[bn_idx[:, None], :, y_flat]       # 这里用到了广播索引
-        # rows 结果 shape: (BN, 3, C, W) 或 (BN, C, 3, W) 取决于索引写法
-        # 为稳定起见，手动整理维度：
-        if rows.dim() == 4 and rows.shape[1] == 3:           # (BN,3,C,W)
-            rows = rows.permute(0, 2, 1, 3)                  # -> (BN,C,3,W)
-
-        # 再在 W 维取 3 列：patch (BN,C,3,3)
-        # x_flat: (BN,3) -> 用 gather
-        x_g = x_flat.unsqueeze(1).unsqueeze(2).expand(bn, C, 3, 3)  # (BN,C,3,3)
-        patch = torch.gather(rows, dim=3, index=x_g)                # (BN,C,3,3)
-
-        patches = patch.reshape(B, N, C, 3, 3)                      # (B,N,C,3,3)
+        # 5) grid_sample -> (BN,C,k,k) -> (B,N,C,k,k)
+        patches_bn = F.grid_sample(
+            frames_bn, grid_bn,
+            mode=mode,
+            padding_mode=padding_mode,
+            align_corners=align_corners,
+        )
+        patches = patches_bn.reshape(B, N, C, k, k)
         return patches
 
-    def forward(self, query: torch.Tensor, images: torch.Tensor | None = None) -> torch.Tensor:
+
+    def forward(self, meta, query: torch.Tensor, images: torch.Tensor | None = None) -> torch.Tensor:
         """
         query:  (B, N, 5)
         images: (B, C, T, H, W) 
         return: (B, N, D)
         """
-        images = images.transpose(1,2)
+        if meta == None:
+            raise("meta = None")
+        if query == None:
+            raise("query = None")
+        img_patch_size = int(meta["img_patch_size"])
+        if img_patch_size != 0:
+            assert images!= None
+            images = images.transpose(1,2)
+
+
+        if img_patch_size!=0 and img_patch_size not in self.img_patch_sizes :
+            raise ValueError(f"Unsupported img_patch_size={img_patch_size}. Supported: {self.img_patch_sizes}")
+
         #images: (B, T, C, H, W) 
         if query.dim() != 3 or query.size(-1) != 5:
             raise ValueError(f"Expected query shape [B, N, 5], got {tuple(query.shape)}")
@@ -232,22 +251,31 @@ class QueryEmbedding(nn.Module):
         token3 = self.t_tgt_emb(t_tgt)
         token4 = self.t_cam_emb(t_cam)
 
+        if img_patch_size != 0:
+            # token5
+            if images is None:
+                raise ValueError("enable_token5=True requires images input of shape [B,T,C,H,W].")
+            if images.dim() != 5:
+                raise ValueError(f"Expected images shape [B,T,C,H,W], got {tuple(images.shape)}")
+            if images.shape[0] != B:
+                raise ValueError(f"images batch {images.shape[0]} != query batch {B}")
+            if images.shape[2] != self.image_in_chans:
+                raise ValueError(f"images C={images.shape[2]} != image_in_chans={self.image_in_chans}")
 
-        # token5
-        if images is None:
-            raise ValueError("enable_token5=True requires images input of shape [B,T,C,H,W].")
-        if images.dim() != 5:
-            raise ValueError(f"Expected images shape [B,T,C,H,W], got {tuple(images.shape)}")
-        if images.shape[0] != B:
-            raise ValueError(f"images batch {images.shape[0]} != query batch {B}")
-        if images.shape[2] != self.image_in_chans:
-            raise ValueError(f"images C={images.shape[2]} != image_in_chans={self.image_in_chans}")
+            patches = self._extract_kxk_patches_grid_sample(
+                images, t_src=t_src, uv=uv,
+                img_patch_size=img_patch_size,
+                mode="bilinear", padding_mode="border", align_corners=True
+            ) 
+            k = img_patch_size
+            patch_flat = patches.reshape(B, N, self.image_in_chans * (k * k)).to(dtype=token1.dtype)
 
-        patches = self._extract_3x3_patches(images, t_src=t_src, uv=uv)  # (B,N,C,3,3)
-        patch_flat = patches.reshape(B, N, self.image_in_chans * 9).to(dtype=token1.dtype)  # (B,N,9C)
-        token5 = self.patch_mlp(patch_flat)  # (B,N,D)
 
-        out = token1 + token2 + token3 + token4 + token5
+            token5 = self.patch_mlps[str(img_patch_size)](patch_flat)
+
+            out = token1 + token2 + token3 + token4 + token5
+        else:
+            out = token1 + token2 + token3 + token4
 
         out = self.out_drop(out)
         
