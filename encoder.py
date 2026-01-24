@@ -57,7 +57,7 @@ class D4RTEncoder(nn.Module):
         self.tubelet_size = tubelet_size
         self.num_register_tokens=num_register_tokens
         self.aspect_ratio_fc = nn.Linear(1, embed_dim)
-        self.patch_start_idx = 1 + num_register_tokens           #没有cls token，有 ar 和 rejester
+        self.patch_start_idx = 1 + num_register_tokens           # ar 和 register
         # num_features for consistency with other models
         self.num_features = self.embed_dim = embed_dim
         self.patch_embed = PatchEmbed(
@@ -72,6 +72,9 @@ class D4RTEncoder(nn.Module):
         assert(all_frames% tubelet_size ==0)
         S=all_frames//tubelet_size      #默认是处以2
         self.register_token = nn.Parameter(torch.randn(1, S, num_register_tokens, embed_dim))
+        nn.init.normal_(self.register_token, std=0.02)
+        assert img_size % patch_size ==0
+        num_patches = img_size**2  /  patch_size**2 * S
         if use_learnable_pos_emb:
             self.pos_embed = nn.Parameter(
                 torch.zeros(1, num_patches, embed_dim))
@@ -141,10 +144,13 @@ class D4RTEncoder(nn.Module):
 
 
     def forward(self, images, meta):
+        #images : [B, C, T, H, W]
         images_tokens = self.patch_embed(images)
         B, S, P, C = images_tokens.shape   #我修改了patch_embed的接口，这里没有问题
         # [B, S, P, embed_dim]
+        images_tokens = images_tokens.reshape(B, S*P ,C)
         images_tokens = images_tokens + self.pos_embed.type_as(images_tokens).to(images_tokens.device)
+        images_tokens = images_tokens.reshape(B, S, P, C)
         num_register_tokens=self.num_register_tokens
         assert(S == self.all_frames//self.tubelet_size)       #固定48帧，合并之后为24
         register_token = slice_expand_and_flatten_per_frame(self.register_token, B, S)
