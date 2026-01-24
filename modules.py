@@ -18,7 +18,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as cp
 from timm.models.layers import drop_path, to_2tuple, trunc_normal_
-from timm.models.registry import register_model
 
 
 def _cfg(url='', **kwargs):
@@ -481,11 +480,11 @@ class PatchEmbed(nn.Module):
     """
 
     def __init__(self,
-                 img_size=224,
+                 img_size=256,
                  patch_size=16,
                  in_chans=3,
                  embed_dim=768,
-                 num_frames=16,
+                 num_frames=48,
                  tubelet_size=2):
         super().__init__()
         img_size = to_2tuple(img_size)

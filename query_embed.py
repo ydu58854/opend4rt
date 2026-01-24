@@ -10,21 +10,12 @@
 import sys
 sys.path.append(".")
 
-from functools import partial
 
 import torch
 import torch.nn as nn
-import torch.utils.checkpoint as cp
 import math
 import torch.nn.functional as F
-from timm.models.layers import trunc_normal_ as __call_trunc_normal_
-from timm.models.registry import register_model
-from .modules import (
-    Block,
-    PatchEmbed,
-    _cfg,
-    get_sinusoid_encoding_table,
-)
+
 class QueryEmbedding(nn.Module):
     """
     Query: (B, N, 5) 每个 query = (u, v, t_src, t_tgt, t_cam)

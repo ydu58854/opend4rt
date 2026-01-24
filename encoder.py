@@ -15,15 +15,16 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
-import math
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
-from timm.models.registry import register_model
 from .modules import (
     Block,
     PatchEmbed,
     _cfg,
     get_sinusoid_encoding_table,
 )
+def trunc_normal_(tensor, mean=0., std=1.):
+    __call_trunc_normal_(tensor, mean=mean, std=std, a=-std, b=std)
+
 class D4RTEncoder(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
@@ -142,12 +143,12 @@ class D4RTEncoder(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed','register_token','aspect_token'}         
+        return {'pos_embed','register_token'}         
 
 
     def forward(self, meta, images):
         #images : [B, C, T, H, W]
-        images_tokens = self.patch_embed(images,img_patch_size = 9)
+        images_tokens = self.patch_embed(images)
         B, S, P, C = images_tokens.shape   #我修改了patch_embed的接口，这里没有问题
         # [B, S, P, embed_dim]
         images_tokens = images_tokens.reshape(B, S*P ,C)
@@ -158,9 +159,20 @@ class D4RTEncoder(nn.Module):
         register_token = slice_expand_and_flatten_per_frame(self.register_token, B, S)
         aspect_ratio=meta["aspect_ratio"]      
         #TODO:上游要实现这个接口，传入ar,目前默认B个batch里面ar都是一样的，ar是单个float；后续可以改成（B，）的tensor
-        ar = torch.tensor([[aspect_ratio]], device=images.device, dtype=images_tokens.dtype)  # (1,1)
-        ar = ar.expand(B * S, 1)  # (B*S,1)
-        aspect_token = self.aspect_ratio_fc(ar).unsqueeze(1)
+
+        ar = meta["aspect_ratio"]
+        if not torch.is_tensor(ar):
+            ar = torch.tensor(ar, device=images.device)
+        ar = ar.to(device=images.device, dtype=images_tokens.dtype)
+
+        if ar.numel() == 1:
+            ar = ar.view(1,1).expand(B,1)     # (B,1)
+        else:
+            ar = ar.view(B,1)                 # (B,1)
+
+        ar = ar[:, None, :].expand(B, S, 1).reshape(B*S, 1)  # (B*S,1)
+        aspect_token = self.aspect_ratio_fc(ar).unsqueeze(1) # (B*S,1,C)
+
         images_tokens = images_tokens.reshape(B*S,P,C)
         tokens = torch.cat([aspect_token, register_token, images_tokens], dim=1)
         _, P, C = tokens.shape      #更新P为tokens总长度

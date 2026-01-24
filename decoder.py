@@ -16,7 +16,6 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
 import math
-from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 from .modules import (
     Block,
     PatchEmbed,

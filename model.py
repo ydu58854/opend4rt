@@ -16,8 +16,7 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
 import math
-from timm.models.layers import trunc_normal_ as __call_trunc_normal_
-from timm.models.registry import register_model
+
 from .modules import (
     Block,
     PatchEmbed,
@@ -56,7 +55,7 @@ class D4RT(nn.Module):
         with_cp=False,
         all_frames=48,
         cos_attn=False,
-        embed_freqs = 10.0,
+        embed_freqs = 10,
         embed_include_uv = False,
         patch_mlp_ratio = 4.0 ,
         img_patch_sizes = (3,6,9,12,15),
@@ -100,7 +99,7 @@ class D4RT(nn.Module):
         self.query_embed = QueryEmbedding(
             embed_dim = decoder_embed_dim,
             num_frames = all_frames ,          # S
-            num_freqs = embed_freqs,      # Fourier 频带数量
+            num_freqs = int(embed_freqs),      # Fourier 频带数量
             include_uv = embed_include_uv,
             dropout = drop_rate,
             image_in_chans = encoder_in_chans,          # images 的 C
@@ -111,8 +110,13 @@ class D4RT(nn.Module):
 
 
 
-        self.pos_embed = get_sinusoid_encoding_table(
-            self.encoder.patch_embed.num_patches, decoder_embed_dim)
+        if use_learnable_pos_emb:
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
+            __call_trunc_normal_(self.pos_embed, std=.02)
+        else:
+            pe = get_sinusoid_encoding_table(num_patches, embed_dim)
+            self.register_buffer("pos_embed", pe, persistent=False)
+
 
 
     def _init_weights(self, m):
