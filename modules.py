@@ -7,6 +7,8 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
+import sys
+sys.path.append(".")
 
 from functools import partial
 
@@ -97,7 +99,7 @@ class CosAttention(nn.Module):
                 torch.log(10 * torch.ones((num_heads, 1, 1))),
                 requires_grad=True)
         else:
-            self.scale = qk_scale
+            self.register_buffer("scale", torch.tensor(float(qk_scale)).view(1,1,1), persistent=False)
 
         self.qkv = nn.Linear(dim, all_head_dim * 3, bias=False)
         if qkv_bias:
@@ -129,6 +131,7 @@ class CosAttention(nn.Module):
 
         # torch.log(torch.tensor(1. / 0.01)) = 4.6052
         logit_scale = torch.clamp(self.scale, max=4.6052).exp()
+        logit_scale = logit_scale.to(attn.device)
 
         attn = attn * logit_scale
 

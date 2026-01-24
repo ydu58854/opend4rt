@@ -7,6 +7,8 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
+import sys
+sys.path.append(".")
 
 from functools import partial
 

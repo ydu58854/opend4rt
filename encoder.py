@@ -7,6 +7,8 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
+import sys
+sys.path.append(".")
 
 from functools import partial
 
@@ -32,7 +34,7 @@ class D4RTEncoder(nn.Module):
                  in_chans=3,
                  embed_dim=768,
                  depth=12,
-                 num_register_tokens=4,
+                 num_register_tokens=0,   #默认是0，因为原文没有用register，但是保留之前写的接口，方便以后调试
                  num_heads=12,
                  mlp_ratio=4.,
                  qkv_bias=False,
@@ -70,7 +72,7 @@ class D4RTEncoder(nn.Module):
         num_patches = self.patch_embed.num_patches
         self.with_cp = with_cp
         assert(all_frames% tubelet_size ==0)
-        S=all_frames//tubelet_size      #默认是处以2
+        S=all_frames//tubelet_size      #默认是除以2
         self.register_token = nn.Parameter(torch.randn(1, S, num_register_tokens, embed_dim))
         nn.init.normal_(self.register_token, std=0.02)
         assert img_size % patch_size ==0
@@ -140,7 +142,7 @@ class D4RTEncoder(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed','register_token'}         #去掉了cls token
+        return {'pos_embed','register_token','aspect_token'}         
 
 
     def forward(self, meta, images):

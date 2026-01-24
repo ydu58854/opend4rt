@@ -7,6 +7,8 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
+import sys
+sys.path.append(".")
 
 from functools import partial
 
@@ -41,7 +43,16 @@ class D4RTDecoder(nn.Module):
         super().__init__()
         # num_features for consistency with other models
         self.num_features = self.embed_dim = embed_dim
-        self.head = nn.Linear(embed_dim, 3)     #预测x,y,z坐标
+        self.head = nn.Linear(embed_dim, 13)     #预测13个维度的4D信息
+        """
+        4D Predictions (13 dims)
+        3D : XYZ position (3 dims)
+        2D : UV position (2 dims)
+        vis : Point visibility (1 dim)
+        disp : Point motion (3 dims)
+        normal : Surface normal (3 dims)
+        conf : Confidence (1 dim)
+        """
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)
                ]  # stochastic depth decay rule

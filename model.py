@@ -7,6 +7,8 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
+import sys
+sys.path.append(".")
 
 from functools import partial
 
@@ -49,8 +51,7 @@ class D4RT(nn.Module):
         norm_layer=nn.LayerNorm,
         init_values=0.,
         use_learnable_pos_emb=False,
-        tubelet_size=2,
-        num_classes=0,  # avoid the error from create_fn in timm
+        tubelet_size=2,  # avoid the error from create_fn in timm
         in_chans=0,  # avoid the error from create_fn in timm
         with_cp=False,
         all_frames=48,
