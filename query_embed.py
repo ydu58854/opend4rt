@@ -174,7 +174,8 @@ class QueryEmbedding(nn.Module):
         # 2) 构造 k×k 像素偏移（允许偶数 -> 半像素偏移）
         # offsets in pixel units, centered at 0
         k = img_patch_size
-        offs = torch.arange(k, device=images.device, dtype=torch.float32) - (k - 1) / 2.0
+        offs = torch.arange(k, device=images.device, dtype=uv.dtype) - (k - 1) / 2.0
+        
         yy, xx = torch.meshgrid(offs, offs, indexing="ij")            # (k,k)
         offsets = torch.stack([xx, yy], dim=-1).reshape(1, 1, k, k, 2)  # (1,1,k,k,2)
 
@@ -215,14 +216,34 @@ class QueryEmbedding(nn.Module):
         images: (B, C, T, H, W) 
         return: (B, N, D)
         """
-        if meta == None:
-            raise("meta = None")
-        if query == None:
-            raise("query = None")
-        img_patch_size = int(meta["img_patch_size"])
+        if meta is None:
+            raise ValueError("meta = None")
+        if query is None:
+            raise ValueError("query = None")
+        if "img_patch_size" not in meta:
+            raise KeyError("meta must contain 'img_patch_size'")
+
+        v = meta["img_patch_size"]
+        ac = meta["align_corners"]
+        if torch.is_tensor(v):
+            img_patch_size = int(v.item())
+        else:
+            img_patch_size = int(v)
+        if torch.is_tensor(ac):
+            ac = int(ac.item())
+        else:
+            ac = int(v)
+            
         if img_patch_size != 0:
-            assert images!= None
-            images = images.transpose(1,2)
+            assert images is not None
+            # want (B,T,C,H,W)
+            if images.shape[1] == self.image_in_chans:      # (B,C,T,H,W)
+                images = images.transpose(1,2)
+            elif images.shape[2] == self.image_in_chans:    # already (B,T,C,H,W)
+                pass
+            else:
+                raise ValueError(f"Cannot infer layout from images.shape={images.shape}")
+
 
 
         if img_patch_size!=0 and img_patch_size not in self.img_patch_sizes :
@@ -233,18 +254,22 @@ class QueryEmbedding(nn.Module):
             raise ValueError(f"Expected query shape [B, N, 5], got {tuple(query.shape)}")
 
         B, N, _ = query.shape
-
-        uv = query[..., 0:2].to(dtype=torch.float32)  # (B,N,2)
+        tok_dtype = self.t_src_emb.weight.dtype
+        uv = query[..., 0:2].to(dtype=tok_dtype)  # (B,N,2)
         uv = uv.clamp(0.0, 1.0)
 
         # 时间索引：转 long 并 clamp
+        T = images.shape[1]
+        if T != self.num_frames:
+            raise ValueError("T != images.shape[1]")
         t_src = query[..., 2].round().long().clamp(0, self.num_frames - 1)  # (B,N)
         t_tgt = query[..., 3].round().long().clamp(0, self.num_frames - 1)
         t_cam = query[..., 4].round().long().clamp(0, self.num_frames - 1)
 
         # token1
-        uv_feat = self._fourier_uv(uv)        # (B,N,4F[+2])
-        token1 = self.uv_proj(uv_feat)        # (B,N,D)
+        uv_f = uv.to(torch.float32)。           #float32对于fourier计算更加友好
+        uv_feat = self._fourier_uv(uv_f)        # (B,N,4F[+2])
+        token1 = self.uv_proj(uv_feat).to(tok_dtype)        # (B,N,D)
 
         # token2/3/4
         token2 = self.t_src_emb(t_src)        # (B,N,D)
@@ -265,7 +290,7 @@ class QueryEmbedding(nn.Module):
             patches = self._extract_kxk_patches_grid_sample(
                 images, t_src=t_src, uv=uv,
                 img_patch_size=img_patch_size,
-                mode="bilinear", padding_mode="border", align_corners=True
+                mode="bilinear", padding_mode="border", align_corners=ac
             ) 
             k = img_patch_size
             patch_flat = patches.reshape(B, N, self.image_in_chans * (k * k)).to(dtype=token1.dtype)
