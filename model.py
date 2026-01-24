@@ -1,3 +1,13 @@
+# --------------------------------------------------------
+# Based on BEiT, timm, DINO, VideoMAE, VGGT and DeiT code bases
+# https://github.com/microsoft/unilm/tree/master/beit
+# https://github.com/rwightman/pytorch-image-models/tree/master/timm
+# https://github.com/facebookresearch/deit
+# https://github.com/facebookresearch/dino
+# https://github.com/MCG-NJU/VideoMAE
+# https://github.com/facebookresearch/vggt
+# --------------------------------------------------------'
+
 from functools import partial
 
 import torch
@@ -15,7 +25,6 @@ from .modules import (
 from .encoder import D4RTEncoder
 from .decoder import D4RTDecoder
 from .query_embed import QueryEmbedding
-#test
 class D4RT(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
@@ -73,8 +82,6 @@ class D4RT(nn.Module):
             cos_attn=cos_attn)
 
         self.decoder = D4RTDecoder(
-            patch_size=patch_size,
-            num_patches=self.encoder.patch_embed.num_patches,
             embed_dim=decoder_embed_dim,
             depth=decoder_depth,
             num_heads=decoder_num_heads,
@@ -115,14 +122,14 @@ class D4RT(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def get_num_layers(self):
-        return len(self.blocks)
+        return self.encoder.get_num_layers() + self.decoder.get_num_layers()
 
     @torch.jit.ignore
     def no_weight_decay(self):
         return {'pos_embed', 'register_token'}
 
-    def forward(self, images, query):
-        global_scene_rep = self.encoder(images) # [B, Nc, C1]
+    def forward(self, images, query, meta):
+        global_scene_rep = self.encoder(images, meta) # [B, Nc, C1]
         query = self.query_embed(query,images)  # [B, Nq, C2]
         predictions = self.decoder(query,global_scene_rep)
 

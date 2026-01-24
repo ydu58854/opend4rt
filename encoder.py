@@ -1,3 +1,13 @@
+# --------------------------------------------------------
+# Based on BEiT, timm, DINO, VideoMAE, VGGT and DeiT code bases
+# https://github.com/microsoft/unilm/tree/master/beit
+# https://github.com/rwightman/pytorch-image-models/tree/master/timm
+# https://github.com/facebookresearch/deit
+# https://github.com/facebookresearch/dino
+# https://github.com/MCG-NJU/VideoMAE
+# https://github.com/facebookresearch/vggt
+# --------------------------------------------------------'
+
 from functools import partial
 
 import torch
@@ -85,7 +95,7 @@ class D4RTEncoder(nn.Module):
                 norm_layer=norm_layer,
                 init_values=init_values,
                 cos_attn=cos_attn,
-                atten_type="self") for i in range(self.aa_num)
+                attn_type="self") for i in range(self.aa_num)
         ])
         self.frame_blocks = nn.ModuleList([
             Block(
@@ -100,7 +110,7 @@ class D4RTEncoder(nn.Module):
                 norm_layer=norm_layer,
                 init_values=init_values,
                 cos_attn=cos_attn,
-                atten_type="self") for i in range(self.aa_num)
+                attn_type="self") for i in range(self.aa_num)
         ])
         # for name, value in (("_resnet_mean", _RESNET_MEAN), ("_resnet_std", _RESNET_STD)):
         #     self.register_buffer(name, torch.FloatTensor(value).view(1, 1, 3, 1, 1), persistent=False)
@@ -130,7 +140,7 @@ class D4RTEncoder(nn.Module):
         return {'pos_embed','register_token'}         #去掉了cls token
 
 
-    def forward(self, images,meta):
+    def forward(self, images, meta):
         images_tokens = self.patch_embed(images)
         B, S, P, C = images_tokens.shape   #我修改了patch_embed的接口，这里没有问题
         # [B, S, P, embed_dim]

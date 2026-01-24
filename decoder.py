@@ -1,3 +1,13 @@
+# --------------------------------------------------------
+# Based on BEiT, timm, DINO, VideoMAE, VGGT and DeiT code bases
+# https://github.com/microsoft/unilm/tree/master/beit
+# https://github.com/rwightman/pytorch-image-models/tree/master/timm
+# https://github.com/facebookresearch/deit
+# https://github.com/facebookresearch/dino
+# https://github.com/MCG-NJU/VideoMAE
+# https://github.com/facebookresearch/vggt
+# --------------------------------------------------------'
+
 from functools import partial
 
 import torch
@@ -32,7 +42,6 @@ class D4RTDecoder(nn.Module):
         super().__init__()
         # num_features for consistency with other models
         self.num_features = self.embed_dim = embed_dim
-        self.with_cp = with_cp
         self.head = nn.Linear(embed_dim, 3)     #预测x,y,z坐标
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)
@@ -50,7 +59,7 @@ class D4RTDecoder(nn.Module):
                 norm_layer=norm_layer,
                 init_values=init_values,
                 cos_attn=cos_attn,
-                atten_type="cross") for i in range(depth)
+                attn_type="cross") for i in range(depth)
         ])
         self.norm = norm_layer(embed_dim)
         self.apply(self._init_weights)
@@ -74,7 +83,7 @@ class D4RTDecoder(nn.Module):
 
     def forward(self, query, Global_Scene_Rep):
         for blk in self.blocks:
-            query = blk(query, context = Global_Scene_Rep)
+            query = blk(query, Global_Scene_Rep)
 
         predictions = self.head(self.norm(query))
         return predictions
