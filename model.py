@@ -131,7 +131,7 @@ class D4RT(nn.Module):
         return {'pos_embed', 'register_token'}
 
     def forward(self, meta, images, query):
-        global_scene_rep = self.encoder(images, meta) # [B, Nc, C1]
+        global_scene_rep = self.encoder(meta, images) # [B, Nc, C1]
         query = self.query_embed(meta, query,images )  # [B, Nq, C2]
         predictions = self.decoder(query,global_scene_rep)
 

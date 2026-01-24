@@ -196,9 +196,8 @@ class Attention(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+
+
 
 class CosCrossAttention(nn.Module):
     """

@@ -167,7 +167,7 @@ class QueryEmbedding(nn.Module):
         assert img_patch_size > 0
 
         # 1) 逐 query 取对应帧: frames (B,N,C,H,W) -> (BN,C,H,W)
-        b_idx = torch.arange(B, device=images.device).view(B, 1).expand(B, N)
+        b_idx = torch.arange(B, device=images.device).reshape(B, 1).expand(B, N)
         frames = images[b_idx, t_src]                      # (B,N,C,H,W)
         frames_bn = frames.reshape(B * N, C, H, W)         # (BN,C,H,W)
 

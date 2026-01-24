@@ -74,7 +74,7 @@ class D4RTEncoder(nn.Module):
         self.register_token = nn.Parameter(torch.randn(1, S, num_register_tokens, embed_dim))
         nn.init.normal_(self.register_token, std=0.02)
         assert img_size % patch_size ==0
-        num_patches = img_size**2  /  patch_size**2 * S
+        num_patches = img_size**2  //  patch_size**2 * S
         if use_learnable_pos_emb:
             self.pos_embed = nn.Parameter(
                 torch.zeros(1, num_patches, embed_dim))
@@ -159,7 +159,7 @@ class D4RTEncoder(nn.Module):
         ar = torch.tensor([[aspect_ratio]], device=images.device, dtype=images_tokens.dtype)  # (1,1)
         ar = ar.expand(B * S, 1)  # (B*S,1)
         aspect_token = self.aspect_ratio_fc(ar).unsqueeze(1)
-        images_tokens = images_tokens.view(B*S,P,C)
+        images_tokens = images_tokens.reshape(B*S,P,C)
         tokens = torch.cat([aspect_token, register_token, images_tokens], dim=1)
         _, P, C = tokens.shape      #更新P为tokens总长度
         frame_idx = 0
