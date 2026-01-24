@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
 import math
-
+from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 from .modules import (
     Block,
     PatchEmbed,
@@ -26,6 +26,8 @@ from .modules import (
 from .encoder import D4RTEncoder
 from .decoder import D4RTDecoder
 from .query_embed import QueryEmbedding
+def trunc_normal_(tensor, mean=0., std=1.):
+    __call_trunc_normal_(tensor, mean=mean, std=std, a=-std, b=std)
 class D4RT(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
@@ -109,7 +111,8 @@ class D4RT(nn.Module):
         )
 
 
-
+        embed_dim=encoder_embed_dim
+        num_patches=self.encoder.patch_embed.num_patches
         if use_learnable_pos_emb:
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
             __call_trunc_normal_(self.pos_embed, std=.02)

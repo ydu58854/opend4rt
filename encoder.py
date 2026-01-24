@@ -77,7 +77,6 @@ class D4RTEncoder(nn.Module):
         self.register_token = nn.Parameter(torch.randn(1, S, num_register_tokens, embed_dim))
         nn.init.normal_(self.register_token, std=0.02)
         assert img_size % patch_size ==0
-        num_patches = img_size**2  //  patch_size**2 * S
         if use_learnable_pos_emb:
             self.pos_embed = nn.Parameter(
                 torch.zeros(1, num_patches, embed_dim))
