@@ -57,8 +57,8 @@ class D4RT(nn.Module):
         cos_attn=False,
         embed_freqs = 10.0,
         embed_include_uv = False,
-        patch_mlp_ratio = 4.,
-        img_patch_sizes = (3,6,9,12,15)
+        patch_mlp_ratio = 4.0 ,
+        img_patch_sizes = (3,6,9,12,15),
     ):
         super().__init__()
         self.encoder = D4RTEncoder(

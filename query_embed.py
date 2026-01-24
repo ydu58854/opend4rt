@@ -224,15 +224,15 @@ class QueryEmbedding(nn.Module):
             raise KeyError("meta must contain 'img_patch_size'")
 
         v = meta["img_patch_size"]
-        ac = meta["align_corners"]
+        ac = meta.get("align_corners", True)
         if torch.is_tensor(v):
             img_patch_size = int(v.item())
         else:
             img_patch_size = int(v)
         if torch.is_tensor(ac):
-            ac = int(ac.item())
+            ac = bool(ac.item())
         else:
-            ac = int(v)
+            ac = bool(ac)
             
         if img_patch_size != 0:
             assert images is not None
@@ -243,6 +243,10 @@ class QueryEmbedding(nn.Module):
                 pass
             else:
                 raise ValueError(f"Cannot infer layout from images.shape={images.shape}")
+            T = images.shape[1]
+            if T != self.num_frames:
+                raise ValueError(f"T={T} != num_frames={self.num_frames}")
+
 
 
 
@@ -259,15 +263,13 @@ class QueryEmbedding(nn.Module):
         uv = uv.clamp(0.0, 1.0)
 
         # 时间索引：转 long 并 clamp
-        T = images.shape[1]
-        if T != self.num_frames:
-            raise ValueError("T != images.shape[1]")
+
         t_src = query[..., 2].round().long().clamp(0, self.num_frames - 1)  # (B,N)
         t_tgt = query[..., 3].round().long().clamp(0, self.num_frames - 1)
         t_cam = query[..., 4].round().long().clamp(0, self.num_frames - 1)
 
         # token1
-        uv_f = uv.to(torch.float32)。           #float32对于fourier计算更加友好
+        uv_f = uv.to(torch.float32)           #float32对于fourier计算更加友好
         uv_feat = self._fourier_uv(uv_f)        # (B,N,4F[+2])
         token1 = self.uv_proj(uv_feat).to(tok_dtype)        # (B,N,D)
 
@@ -288,7 +290,7 @@ class QueryEmbedding(nn.Module):
                 raise ValueError(f"images C={images.shape[2]} != image_in_chans={self.image_in_chans}")
 
             patches = self._extract_kxk_patches_grid_sample(
-                images, t_src=t_src, uv=uv,
+                images, t_src=t_src, uv=uv_f,
                 img_patch_size=img_patch_size,
                 mode="bilinear", padding_mode="border", align_corners=ac
             ) 
