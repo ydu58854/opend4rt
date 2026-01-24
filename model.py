@@ -15,6 +15,7 @@ from .modules import (
 from .encoder import D4RTEncoder
 from .decoder import D4RTDecoder
 from .query_embed import QueryEmbedding
+#test
 class D4RT(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
