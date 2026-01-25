@@ -18,6 +18,8 @@ from torch.nn import Module
 from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
+from loss_head import LossHead
+
 
 @dataclass(frozen=True)
 class LossWeights:
@@ -38,13 +40,19 @@ class CompositeLoss(Module):
         super().__init__()
         self.weights = weights or LossWeights()
 
-    def forward(self, losses: Mapping[str, Tensor], confidence: Tensor) -> Tensor:
+    def forward(
+        self,
+        losses: Mapping[str, Tensor],
+        confidence: Tensor,
+        query_mask: Tensor | None = None,
+    ) -> Tensor:
         """Compute the composite loss.
 
         Args:
             losses: Mapping containing per-query task losses with keys:
                 "L3D", "L2D", "Lvis", "Ldisp", "Lconf", "Lnormal".
             confidence: Predicted confidence score c for each query.
+            query_mask: Boolean mask indicating valid queries.
         """
         weights = self.weights
         conf = confidence.clamp_min(1e-6)
@@ -66,7 +74,12 @@ class CompositeLoss(Module):
             + term_conf
             + term_normal
         )
-        return total.mean()
+        if query_mask is None:
+            return total.mean()
+        mask = query_mask.unsqueeze(-1).to(total.dtype)
+        masked_total = total * mask
+        denom = mask.sum().clamp_min(1.0)
+        return masked_total.sum() / denom
 
 
 def build_optimizer(parameters: Iterable[torch.nn.Parameter], lr: float = 1e-4) -> Optimizer:
@@ -106,6 +119,7 @@ def train_step(
     model: Module,
     batch: Dict[str, Tensor],
     loss_fn: CompositeLoss,
+    loss_head: LossHead | None = None,
     optimizer: Optimizer,
     scheduler: LambdaLR | None = None,
     max_grad_norm: float = 10.0,
@@ -113,15 +127,17 @@ def train_step(
     """Run a single training step.
 
     Expects batch to contain ``meta``, ``images``, ``query``, and a ``targets``
-    dict with task-specific losses already computed per query.
+    dict with task-specific ground-truth tensors per query.
     """
 
     model.train()
     optimizer.zero_grad(set_to_none=True)
 
-    outputs = model(batch["meta"], batch["images"], batch["query"])
-    confidence = outputs["confidence"]
-    loss = loss_fn(batch["targets"], confidence)
+    predictions = model(batch["meta"], batch["images"], batch["query"])
+    if loss_head is None:
+        loss_head = LossHead()
+    losses, confidence = loss_head(predictions, batch["targets"])
+    loss = loss_fn(losses, confidence, batch["targets"].get("query_mask"))
     loss.backward()
 
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
