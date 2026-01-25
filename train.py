@@ -76,7 +76,7 @@ class CompositeLoss(Module):
         )
         if query_mask is None:
             return total.mean()
-        mask = query_mask.unsqueeze(-1).to(total.dtype)
+        mask = query_mask.unsqueeze(-1).to(total.device, total.dtype)
         masked_total = total * mask
         denom = mask.sum().clamp_min(1.0)
         return masked_total.sum() / denom
@@ -119,7 +119,7 @@ def train_step(
     model: Module,
     batch: Dict[str, Tensor],
     loss_fn: CompositeLoss,
-    loss_head: LossHead | None = None,
+    loss_head: LossHead ,
     optimizer: Optimizer,
     scheduler: LambdaLR | None = None,
     max_grad_norm: float = 10.0,
