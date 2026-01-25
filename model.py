@@ -111,16 +111,6 @@ class D4RT(nn.Module):
         )
 
 
-        embed_dim=encoder_embed_dim
-        num_patches=self.encoder.patch_embed.num_patches
-        if use_learnable_pos_emb:
-            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
-            __call_trunc_normal_(self.pos_embed, std=.02)
-        else:
-            pe = get_sinusoid_encoding_table(num_patches, embed_dim)
-            self.register_buffer("pos_embed", pe, persistent=False)
-
-
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):

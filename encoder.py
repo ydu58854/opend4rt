@@ -111,7 +111,7 @@ class D4RTEncoder(nn.Module):
                 qk_scale=qk_scale,
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
-                drop_path=dpr[2*i],
+                drop_path=dpr[2*i],                   #注意，如果改了aa_order，这里的奇偶性也得改，奇偶里面内含了顺序
                 norm_layer=norm_layer,
                 init_values=init_values,
                 cos_attn=cos_attn,
