@@ -35,7 +35,6 @@ class D4RTEncoder(nn.Module):
                  in_chans=3,
                  embed_dim=768,
                  depth=12,
-                 num_register_tokens=0,   #默认是0，因为原文没有用register，但是保留之前写的接口，方便以后调试
                  num_heads=12,
                  mlp_ratio=4.,
                  qkv_bias=False,
@@ -58,9 +57,7 @@ class D4RTEncoder(nn.Module):
         self.aa_order=aa_order
         self.depth=depth
         self.tubelet_size = tubelet_size
-        self.num_register_tokens=num_register_tokens
-        self.aspect_ratio_fc = nn.Linear(1, embed_dim)
-        self.patch_start_idx = 1 + num_register_tokens           # ar 和 register
+        self.aspect_ratio_fc = nn.Linear(1, embed_dim)          # ar 和 register
         # num_features for consistency with other models
         self.num_features = self.embed_dim = embed_dim
         self.patch_embed = PatchEmbed(
@@ -74,8 +71,6 @@ class D4RTEncoder(nn.Module):
         self.with_cp = with_cp
         assert(all_frames% tubelet_size ==0)
         S=all_frames//tubelet_size      #默认是除以2
-        self.register_token = nn.Parameter(torch.randn(1, S, num_register_tokens, embed_dim))
-        nn.init.normal_(self.register_token, std=0.02)
         assert img_size % patch_size ==0
         if use_learnable_pos_emb:
             self.pos_embed = nn.Parameter(
@@ -142,7 +137,7 @@ class D4RTEncoder(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed','register_token'}         
+        return {'pos_embed'}         
 
 
     def forward(self, meta, images):
@@ -153,10 +148,7 @@ class D4RTEncoder(nn.Module):
         images_tokens = images_tokens.reshape(B, S*P ,C)
         images_tokens = images_tokens + self.pos_embed.type_as(images_tokens).to(images_tokens.device)
         images_tokens = images_tokens.reshape(B, S, P, C)
-        num_register_tokens=self.num_register_tokens
         assert(S == self.all_frames//self.tubelet_size)       #固定48帧，合并之后为24
-        register_token = slice_expand_and_flatten_per_frame(self.register_token, B, S)
-        aspect_ratio=meta["aspect_ratio"]      
         #TODO:上游要实现这个接口，传入ar,目前默认B个batch里面ar都是一样的，ar是单个float；后续可以改成（B，）的tensor
 
         ar = meta["aspect_ratio"]
@@ -173,7 +165,7 @@ class D4RTEncoder(nn.Module):
         aspect_token = self.aspect_ratio_fc(ar).unsqueeze(1) # (B*S,1,C)
 
         images_tokens = images_tokens.reshape(B*S,P,C)
-        tokens = torch.cat([aspect_token, register_token, images_tokens], dim=1)
+        tokens = torch.cat([aspect_token, images_tokens], dim=1)
         _, P, C = tokens.shape      #更新P为tokens总长度
         frame_idx = 0
         global_idx = 0
@@ -209,16 +201,3 @@ class D4RTEncoder(nn.Module):
         tokens=tokens.reshape(B, S * P, C)
         tokens = self.norm(tokens)
         return tokens
-def slice_expand_and_flatten_per_frame(token_tensor, B, S):
-    """
-    token_tensor: (1, max_frames, X, C)
-    return: (B*S, X, C) with per-frame unique tokens
-    """
-    # (1, S, X, C)
-    tok = token_tensor[:, :S, ...]
-    # (B, S, X, C)
-    tok = tok.expand(B, S, *tok.shape[2:])
-    # (B*S, X, C)
-    tok = tok.reshape(B * S, *tok.shape[2:])
-    return tok
-

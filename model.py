@@ -14,8 +14,6 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-import torch.utils.checkpoint as cp
-import math
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 from .modules import (
     Block,
@@ -52,8 +50,7 @@ class D4RT(nn.Module):
         norm_layer=nn.LayerNorm,
         init_values=0.,
         use_learnable_pos_emb=False,
-        tubelet_size=2,  # avoid the error from create_fn in timm
-        in_chans=0,  # avoid the error from create_fn in timm
+        tubelet_size=2,  
         with_cp=False,
         all_frames=48,
         cos_attn=False,
@@ -126,7 +123,7 @@ class D4RT(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed', 'register_token'}
+        return {'pos_embed'}
 
     def forward(self, meta, images, query):
         global_scene_rep = self.encoder(meta, images) # [B, Nc, C1]
