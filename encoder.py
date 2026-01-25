@@ -7,16 +7,13 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
-import sys
-sys.path.append(".")
-
 from functools import partial
 
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
-from .modules import (
+from modules import (
     Block,
     PatchEmbed,
     _cfg,

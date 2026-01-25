@@ -7,16 +7,13 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
-import sys
-sys.path.append(".")
-
 from functools import partial
 
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
 import math
-from .modules import (
+from modules import (
     Block,
     PatchEmbed,
     _cfg,

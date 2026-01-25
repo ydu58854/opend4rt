@@ -7,10 +7,6 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
-import sys
-sys.path.append(".")
-
-
 import torch
 import torch.nn as nn
 import math
