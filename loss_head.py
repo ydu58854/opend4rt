@@ -41,13 +41,21 @@ class LossHead(Module):
         tgt_conf = targets["Lconf"].to(predictions.device)
         tgt_normal = targets["Lnormal"].to(predictions.device)
 
-        loss_3d = F.smooth_l1_loss(pred_xyz, tgt_xyz, reduction="none").mean(dim=-1, keepdim=True)
+        pred_mean_depth = pred_xyz[..., 2].abs().mean(dim=1, keepdim=True).clamp_min(1e-6)
+        tgt_mean_depth = tgt_xyz[..., 2].abs().mean(dim=1, keepdim=True).clamp_min(1e-6)
+        pred_xyz_norm = pred_xyz / pred_mean_depth
+        tgt_xyz_norm = tgt_xyz / tgt_mean_depth
+        pred_xyz_t = torch.sign(pred_xyz_norm) * torch.log1p(pred_xyz_norm.abs())
+        tgt_xyz_t = torch.sign(tgt_xyz_norm) * torch.log1p(tgt_xyz_norm.abs())
+        loss_3d = F.l1_loss(pred_xyz_t, tgt_xyz_t, reduction="none").mean(dim=-1, keepdim=True)
         loss_2d = F.smooth_l1_loss(pred_uv, tgt_uv, reduction="none").mean(dim=-1, keepdim=True)
         loss_vis = F.binary_cross_entropy_with_logits(pred_vis, tgt_vis, reduction="none")
         loss_disp = F.smooth_l1_loss(pred_disp, tgt_disp, reduction="none").mean(dim=-1, keepdim=True)
         pred_confidence = torch.sigmoid(pred_conf)
         loss_conf = F.l1_loss(pred_confidence, tgt_conf, reduction="none")
-        loss_normal = F.smooth_l1_loss(pred_normal, tgt_normal, reduction="none").mean(dim=-1, keepdim=True)
+        pred_normal_n = F.normalize(pred_normal, dim=-1)
+        tgt_normal_n = F.normalize(tgt_normal, dim=-1)
+        loss_normal = (1.0 - (pred_normal_n * tgt_normal_n).sum(dim=-1, keepdim=True))
 
         losses = {
             "L3D": loss_3d,

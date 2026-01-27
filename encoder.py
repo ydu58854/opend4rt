@@ -31,7 +31,7 @@ class D4RTEncoder(nn.Module):
                  patch_size=16,
                  in_chans=3,
                  embed_dim=768,
-                 depth=12,
+                 depth=40,
                  num_heads=12,
                  mlp_ratio=4.,
                  qkv_bias=False,
@@ -150,13 +150,12 @@ class D4RTEncoder(nn.Module):
 
         ar = meta["aspect_ratio"]
         if not torch.is_tensor(ar):
-            ar = torch.tensor(ar, device=images.device)
+            raise ValueError("aspect ratio should be a tensor")
         ar = ar.to(device=images.device, dtype=images_tokens.dtype)
+        if ar.shape != (B,1):
+            raise ValueError("aspect ratio should have shape (B,1), got {}".format(ar.shape))
 
-        if ar.numel() == 1:
-            ar = ar.view(1,1).expand(B,1)     # (B,1)
-        else:
-            ar = ar.view(B,1)                 # (B,1)
+        ar = ar.view(B,1)                 # (B,1)
 
         ar = ar[:, None, :].expand(B, S, 1).reshape(B*S, 1)  # (B*S,1)
         aspect_token = self.aspect_ratio_fc(ar).unsqueeze(1) # (B*S,1,C)
@@ -198,3 +197,4 @@ class D4RTEncoder(nn.Module):
         tokens=tokens.reshape(B, S * P, C)
         tokens = self.norm(tokens)
         return tokens
+

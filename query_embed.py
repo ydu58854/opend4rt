@@ -77,7 +77,7 @@ class QueryEmbedding(nn.Module):
         self.t_tgt_emb = nn.Embedding(num_frames, embed_dim)
         self.t_cam_emb = nn.Embedding(num_frames, embed_dim)
 
-        out_mlp_hidden = embed_dim * out_mlp_ratio
+        out_mlp_hidden = int(embed_dim * out_mlp_ratio)
         self.out_mlp = nn.Sequential(
             nn.Linear(embed_dim, out_mlp_hidden),
             nn.GELU(),
