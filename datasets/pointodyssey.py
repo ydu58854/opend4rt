@@ -320,16 +320,23 @@ class PointOdysseyDataset(Base4DTrajectoryDataset):
         anno = self._load_anno(scene_id)
         intrinsics = anno["intrinsics"][frame_indices]
 
-        # Scale intrinsics for target resolution
-        orig_H, orig_W = depths.shape[1], depths.shape[2]
+        # Get original resolution from scene info (depths is already at target resolution)
+        scene_info = next((s for s in self.scenes if s["scene_id"] == scene_id), None)
+        if scene_info is not None and "orig_size" in scene_info:
+            orig_W, orig_H = scene_info["orig_size"]
+        else:
+            # Fallback: infer from intrinsics (assumes principal point at center)
+            orig_W = int(intrinsics[0, 0, 2] * 2)
+            orig_H = int(intrinsics[0, 1, 2] * 2)
+
         W, H = self.config.target_resolution
 
         normals = []
         for t in range(len(frame_indices)):
             K = intrinsics[t].copy()
             # Intrinsics are for original resolution, scale for target
-            scale_x = W / orig_W if orig_W != W else 1.0
-            scale_y = H / orig_H if orig_H != H else 1.0
+            scale_x = W / orig_W
+            scale_y = H / orig_H
             K[0, 0] *= scale_x
             K[1, 1] *= scale_y
             K[0, 2] *= scale_x
@@ -372,14 +379,11 @@ class PointOdysseySingleFrameDataset(PointOdysseyDataset):
         total_frames = traj_data["trajs_2d"].shape[0]
         t = min(self.frame_index, total_frames - 1)
 
-        # For model compatibility, we still need 48 frames (same frame repeated)
-        frame_indices = [t] * self.config.num_frames
-
-        # Load frames (same frame repeated)
+        # Load frames (same frame repeated for model compatibility)
         images = self._load_frames(scene_id, [t])  # (C, 1, H, W)
         images = images.expand(-1, self.config.num_frames, -1, -1).contiguous()
 
-        C, T, H, W = images.shape
+        C, _, H, W = images.shape
 
         # Get original resolution from scene_info (stored during _load_scene_list)
         orig_W, orig_H = scene_info["orig_size"]

@@ -131,8 +131,22 @@ class TrajectoryQuerySampler:
             )
             all_queries.extend(rand_queries)
 
+        # Handle empty queries case
+        if len(all_queries) == 0:
+            return (
+                torch.zeros((0, 5), dtype=torch.float32),
+                {
+                    "L3D": torch.zeros((0, 3), dtype=torch.float32),
+                    "L2D": torch.zeros((0, 2), dtype=torch.float32),
+                    "Lvis": torch.zeros((0, 1), dtype=torch.float32),
+                    "Ldisp": torch.zeros((0, 3), dtype=torch.float32),
+                    "Lconf": torch.zeros((0, 1), dtype=torch.float32),
+                    "Lnormal": torch.zeros((0, 3), dtype=torch.float32),
+                }
+            )
+
         # Convert to arrays
-        queries_array = np.array(all_queries)  # (N, 4): [t_src, t_tgt, point_idx, ...]
+        queries_array = np.array(all_queries)  # (N, 3): [t_src, t_tgt, point_idx]
 
         # Compute all targets
         queries, targets = self._compute_targets(
@@ -141,7 +155,6 @@ class TrajectoryQuerySampler:
             trajs_3d_sampled,
             valids_sampled,
             visibs_sampled,
-            intrinsics_sampled,  # Already scaled to target resolution
             extrinsics_sampled,
             W, H,
             orig_W, orig_H,
@@ -242,9 +255,8 @@ class TrajectoryQuerySampler:
             else:
                 point_idx = np.random.choice(valid_points)
 
-            # Select target frame (different from source for edge queries)
+            # Select target frame uniformly at random
             t_tgt = np.random.randint(0, T)
-            t_cam = t_tgt  # Camera frame same as target
 
             queries.append((t_src, t_tgt, point_idx))
 
@@ -294,7 +306,6 @@ class TrajectoryQuerySampler:
         trajs_3d: np.ndarray,
         valids: np.ndarray,
         visibs: np.ndarray,
-        intrinsics: np.ndarray,
         extrinsics: np.ndarray,
         W: int,
         H: int,
@@ -310,7 +321,6 @@ class TrajectoryQuerySampler:
             trajs_3d: Sampled 3D trajectories (T, N_points, 3).
             valids: Validity mask (T, N_points).
             visibs: Visibility mask (T, N_points).
-            intrinsics: Scaled camera intrinsics (T, 3, 3) for target resolution.
             extrinsics: Camera extrinsics w2c (T, 4, 4).
             W, H: Target image dimensions.
             orig_W, orig_H: Original image dimensions.
@@ -406,13 +416,19 @@ class TrajectoryQuerySampler:
             # D4RT expects OpenCV camera space (+Z forward, facing normals have Z < 0)
             # Conversion: Y_opencv = -Y_opengl, Z_opencv = -Z_opengl
             if normals is not None:
-                # Sample normal at target location
+                # Sample normal at target location (in t_tgt's OpenGL camera frame)
                 px_int = int(np.clip(px_tgt, 0, W - 1))
                 py_int = int(np.clip(py_tgt, 0, H - 1))
                 normal = normals[t_tgt, py_int, px_int].copy()
                 # Convert from OpenGL to OpenCV camera space
                 normal[1] = -normal[1]  # Flip Y
                 normal[2] = -normal[2]  # Flip Z
+                # Rotate normal from t_tgt camera frame to t_cam camera frame
+                # n_world = R_tgt^T @ n_tgt, n_cam = R_cam @ n_world
+                if t_cam != t_tgt:
+                    R_cam = extrinsics[t_cam, :3, :3]
+                    R_tgt = extrinsics[t_tgt, :3, :3]
+                    normal = R_cam @ (R_tgt.T @ normal)
                 # Normalize to unit vector (normals may not be unit due to JPEG compression or interpolation)
                 norm = np.linalg.norm(normal)
                 if norm > 1e-6:

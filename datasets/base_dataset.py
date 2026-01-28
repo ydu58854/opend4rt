@@ -6,8 +6,7 @@ for D4RT-compatible datasets.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -16,7 +15,7 @@ from torch.utils.data import Dataset
 
 from .base_config import Base4DDatasetConfig
 from .trajectory_sampler import TrajectoryQuerySampler
-from .utils import uniform_sample_frames, resize_image, scale_intrinsics
+from .utils import uniform_sample_frames
 
 
 class Base4DTrajectoryDataset(Dataset, ABC):
@@ -192,7 +191,7 @@ class Base4DTrajectoryDataset(Dataset, ABC):
         Returns:
             Dictionary with keys:
                 - intrinsics: (T, 3, 3) camera intrinsic matrices
-                - extrinsics: (T, 4, 4) camera-to-world matrices
+                - extrinsics: (T, 4, 4) world-to-camera (w2c) matrices
         """
         pass
 

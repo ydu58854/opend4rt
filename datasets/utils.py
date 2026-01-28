@@ -119,13 +119,16 @@ def resize_image(
     image: Tensor,
     target_size: Tuple[int, int],
     mode: str = "bilinear",
+    align_corners: Optional[bool] = None,
 ) -> Tensor:
     """Resize an image tensor.
 
     Args:
         image: Image tensor (C, H, W) or (B, C, H, W).
         target_size: Target size (W, H).
-        mode: Interpolation mode.
+        mode: Interpolation mode ('nearest', 'bilinear', 'bicubic', 'area').
+        align_corners: If True, aligns corners. Only valid for 'linear', 'bilinear',
+                       'bicubic', 'trilinear'. If None, uses False for valid modes.
 
     Returns:
         Resized image tensor.
@@ -137,7 +140,13 @@ def resize_image(
     else:
         squeeze = False
 
-    resized = F.interpolate(image, size=(H, W), mode=mode, align_corners=False)
+    # align_corners is only valid for specific modes
+    if mode in ("linear", "bilinear", "bicubic", "trilinear"):
+        if align_corners is None:
+            align_corners = False
+        resized = F.interpolate(image, size=(H, W), mode=mode, align_corners=align_corners)
+    else:
+        resized = F.interpolate(image, size=(H, W), mode=mode)
 
     if squeeze:
         resized = resized.squeeze(0)
@@ -522,21 +531,10 @@ def estimate_normals_from_depth(
     Returns:
         Normal map (H, W, 3) with unit normals.
     """
-    H, W = depth.shape
     fx = intrinsics[0, 0]
     fy = intrinsics[1, 1]
-    cx = intrinsics[0, 2]
-    cy = intrinsics[1, 2]
 
-    # Create pixel coordinate grids
-    u = np.arange(W, dtype=np.float32)
-    v = np.arange(H, dtype=np.float32)
-    u, v = np.meshgrid(u, v)
-
-    # Back-project to 3D
     z = depth
-    x = (u - cx) * z / fx
-    y = (v - cy) * z / fy
 
     # Compute gradients
     dz_dx = np.gradient(z, axis=1)
