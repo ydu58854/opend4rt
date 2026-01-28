@@ -32,7 +32,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train D4RT on easydataset")
     parser.add_argument("--data-dir", type=str, default="/inspire/hdd/project/wuliqifa/public/dyh/d4rt/easydataset")
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--steps", type=int, default=1)
+    parser.add_argument("--steps", type=int, default=100000)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--img-patch-size", type=int, default=9)
     parser.add_argument("--batch-size", type=int, default=2)
