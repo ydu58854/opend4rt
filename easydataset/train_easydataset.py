@@ -30,15 +30,15 @@ def move_to_device(batch, device):
 
 def main():
     parser = argparse.ArgumentParser(description="Train D4RT on easydataset")
-    parser.add_argument("--data-dir", type=str, default="easydataset")
-    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--data-dir", type=str, default="/inspire/hdd/project/wuliqifa/public/dyh/d4rt/easydataset")
+    parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--steps", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--img-patch-size", type=int, default=9)
     args = parser.parse_args()
 
     device = torch.device(args.device)
-    model = D4RT(img_size=256, patch_size=16, all_frames=48).to(device)
+    model = D4RT(img_size=256, patch_size=16, all_frames=48,encoder_depth = 12).to(device)
 
     optimizer = build_optimizer(model.parameters(), lr=args.lr)
     scheduler = build_scheduler(optimizer, warmup_steps=10, total_steps=max(args.steps, 11))

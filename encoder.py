@@ -9,7 +9,7 @@
 # --------------------------------------------------------'
 from functools import partial
 from typing import cast
-
+import os
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
@@ -138,11 +138,8 @@ class D4RTEncoder(nn.Module):
         return {'pos_embed'}         
 
 
-    def load_videomae_pretrained(self, checkpoint_path: str, strict: bool = False):
-        return self.load_videomae_vitb_encoder(checkpoint_path, strict=strict)
 
-
-    def load_videomae_vitb_encoder(self, checkpoint_path: str, strict: bool = False):
+    def load_videomae_vit_encoder(self, checkpoint_path: str, strict: bool = False):
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         state_dict = checkpoint.get("model") or checkpoint.get("state_dict") or checkpoint
         remapped = {}
@@ -211,7 +208,8 @@ class D4RTEncoder(nn.Module):
 
     def load_videomae_encoder(self, checkpoint_path: str, variant: str = "vit-b", strict: bool = False):
         if variant == "vit-b":
-            return self.load_videomae_vitb_encoder(checkpoint_path, strict=strict)
+            checkpoint_path = os.path.join(checkpoint_path,"vit-b","pytorch_model.bin")
+            return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)
         raise ValueError(f"Unsupported VideoMAE variant: {variant}")
 
 

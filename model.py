@@ -55,6 +55,11 @@ class D4RT(nn.Module):
         embed_include_uv = False,
         patch_mlp_ratio = 4.0 ,
         img_patch_sizes = (3,6,9,12,15),
+        encoder_pretrained: bool = True ,
+        encoder_pretrained_path: str = "/inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint",   # 传入 ckpt 路径
+        encoder_pretrained_variant: str = "vit-b",
+        encoder_pretrained_strict: bool = False,
+        encoder_pretrained_verbose: bool = True,
     ):
         super().__init__()
         self.encoder = D4RTEncoder(
@@ -103,7 +108,18 @@ class D4RT(nn.Module):
             out_mlp_ratio = mlp_ratio,
             img_patch_sizes = img_patch_sizes,
         )
-
+        if encoder_pretrained:
+            load_result, skipped = self.encoder.load_videomae_encoder(
+                encoder_pretrained_path,
+                variant=encoder_pretrained_variant,
+                strict=encoder_pretrained_strict,
+            )
+            if encoder_pretrained_verbose:
+                # load_result 是 IncompatibleKeys(missing_keys, unexpected_keys)
+                print("[Encoder pretrained] load_result:", load_result)
+                if skipped:
+                    print(f"[Encoder pretrained] skipped {len(skipped)} keys (e.g. first 20):")
+                    print(skipped[:20])
 
 
     def _init_weights(self, m):
