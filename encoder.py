@@ -35,7 +35,7 @@ class D4RTEncoder(nn.Module):
                  depth=40,
                  num_heads=12,
                  mlp_ratio=4.,
-                 qkv_bias=False,
+                 qkv_bias=True,
                  qk_scale=None,
                  drop_rate=0.,
                  aa_order=["frame","global"],
@@ -166,11 +166,19 @@ class D4RTEncoder(nn.Module):
                     if target_idx >= len(self.frame_blocks):
                         skipped.append(key)
                         continue
+                    if suffix in ("attn.q_bias", "attn.v_bias"):
+                        if getattr(self.frame_blocks[target_idx].attn, "q_bias", None) is None:
+                            skipped.append(key)
+                            continue
                     new_key = f"frame_blocks.{target_idx}.{suffix}"
                 else:
                     if target_idx >= len(self.global_blocks):
                         skipped.append(key)
                         continue
+                    if suffix in ("attn.q_bias", "attn.v_bias"):
+                        if getattr(self.global_blocks[target_idx].attn, "q_bias", None) is None:
+                            skipped.append(key)
+                            continue
                     new_key = f"global_blocks.{target_idx}.{suffix}"
                 remapped[new_key] = value
                 continue

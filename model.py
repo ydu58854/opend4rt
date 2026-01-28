@@ -39,7 +39,7 @@ class D4RT(nn.Module):
         decoder_depth=8,
         decoder_num_heads=8,
         mlp_ratio=4.,
-        qkv_bias=False,
+        qkv_bias=True,
         qk_scale=None,
         drop_rate=0.,
         attn_drop_rate=0.,
@@ -118,7 +118,7 @@ class D4RT(nn.Module):
     def get_num_layers(self):
         return self.encoder.get_num_layers() + self.decoder.get_num_layers()
 
-    @torch.jit.ignore
+    @torch.jit.ignore()
     def no_weight_decay(self):
         return {'pos_embed'}
 
