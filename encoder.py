@@ -8,6 +8,7 @@
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
 from functools import partial
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -132,14 +133,83 @@ class D4RTEncoder(nn.Module):
     def get_num_layers(self):
         return len(self.frame_blocks)+len(self.global_blocks)
 
-    @torch.jit.ignore
+    @torch.jit.ignore()
     def no_weight_decay(self):
         return {'pos_embed'}         
 
 
+    def load_videomae_pretrained(self, checkpoint_path: str, strict: bool = False):
+        return self.load_videomae_vitb_encoder(checkpoint_path, strict=strict)
+
+
+    def load_videomae_vitb_encoder(self, checkpoint_path: str, strict: bool = False):
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = checkpoint.get("model") or checkpoint.get("state_dict") or checkpoint
+        remapped = {}
+        skipped = []
+
+
+        for key, value in state_dict.items():
+            if key.startswith("module."):
+                key = key[len("module."):]
+            if key.startswith("backbone."):
+                key = key[len("backbone."):]
+            if key.startswith("encoder."):
+                key = key[len("encoder."):]
+
+            if key.startswith("blocks."):
+                parts = key.split(".")
+                block_idx = int(parts[1])
+                suffix = ".".join(parts[2:])
+                target_idx = block_idx // 2
+                if block_idx % 2 == 0:
+                    if target_idx >= len(self.frame_blocks):
+                        skipped.append(key)
+                        continue
+                    new_key = f"frame_blocks.{target_idx}.{suffix}"
+                else:
+                    if target_idx >= len(self.global_blocks):
+                        skipped.append(key)
+                        continue
+                    new_key = f"global_blocks.{target_idx}.{suffix}"
+                remapped[new_key] = value
+                continue
+
+            if key.startswith("patch_embed."):
+                remapped[key] = value
+                continue
+
+            if key.startswith("norm."):
+                remapped[key] = value
+                continue
+
+            if key == "pos_embed":
+                remapped[key] = value
+                continue
+
+        if "pos_embed" in remapped:
+            pos_embed = remapped["pos_embed"]
+            if pos_embed.ndim == 3 and pos_embed.shape[1] == self.pos_embed.shape[1] + 1:
+                pos_embed = pos_embed[:, 1:, :]
+            if pos_embed.shape != self.pos_embed.shape:
+                skipped.append("pos_embed")
+                remapped.pop("pos_embed", None)
+            else:
+                remapped["pos_embed"] = pos_embed
+
+        load_result = self.load_state_dict(remapped, strict=strict)
+        return load_result, skipped
+
+
+    def load_videomae_encoder(self, checkpoint_path: str, variant: str = "vit-b", strict: bool = False):
+        if variant == "vit-b":
+            return self.load_videomae_vitb_encoder(checkpoint_path, strict=strict)
+        raise ValueError(f"Unsupported VideoMAE variant: {variant}")
+
+
     def forward(self, meta, images):
         #images : [B, C, T, H, W]
-        images_tokens = self.patch_embed(images)
+        images_tokens: torch.Tensor = self.patch_embed(images)
         B, S, P, C = images_tokens.shape   #我修改了patch_embed的接口，这里没有问题
         # [B, S, P, embed_dim]
         images_tokens = images_tokens.reshape(B, S*P ,C)
@@ -161,7 +231,7 @@ class D4RTEncoder(nn.Module):
         aspect_token = self.aspect_ratio_fc(ar).unsqueeze(1) # (B*S,1,C)
 
         images_tokens = images_tokens.reshape(B*S,P,C)
-        tokens = torch.cat([aspect_token, images_tokens], dim=1)
+        tokens: torch.Tensor = torch.cat([aspect_token, images_tokens], dim=1)
         _, P, C = tokens.shape      #更新P为tokens总长度
         frame_idx = 0
         global_idx = 0
@@ -173,7 +243,7 @@ class D4RTEncoder(nn.Module):
                         tokens = tokens.reshape(B, S, P, C).reshape(B * S, P, C)           
                         
                     if self.with_cp:
-                        tokens = cp.checkpoint(self.frame_blocks[frame_idx], tokens)
+                        tokens = cast(torch.Tensor, cp.checkpoint(self.frame_blocks[frame_idx], tokens))
                     else:
                         tokens = self.frame_blocks[frame_idx](tokens)
                     frame_idx += 1
@@ -186,7 +256,7 @@ class D4RTEncoder(nn.Module):
                         tokens = tokens.reshape(B, S, P, C).reshape(B, S * P, C)
                         
                     if self.with_cp:
-                        tokens = cp.checkpoint(self.global_blocks[global_idx], tokens)
+                        tokens = cast(torch.Tensor, cp.checkpoint(self.global_blocks[global_idx], tokens))
                     else:
                         tokens = self.global_blocks[global_idx](tokens)
                     global_idx += 1
@@ -197,4 +267,3 @@ class D4RTEncoder(nn.Module):
         tokens=tokens.reshape(B, S * P, C)
         tokens = self.norm(tokens)
         return tokens
-
