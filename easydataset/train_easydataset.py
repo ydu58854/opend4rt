@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--steps", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--img-patch-size", type=int, default=9)
+    parser.add_argument("--batch-size", type=int, default=2)
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -53,6 +54,15 @@ def main():
     for step in range(args.steps):
         sample = torch.load(files[step % len(files)], map_location="cpu")
         sample["meta"]["img_patch_size"] = int(args.img_patch_size)
+        if args.batch_size > 0:
+            bs = args.batch_size
+            sample["images"] = sample["images"][:bs]
+            sample["query"] = sample["query"][:bs]
+            sample["meta"]["aspect_ratio"] = sample["meta"]["aspect_ratio"][:bs]
+            targets = {}
+            for key, value in sample["targets"].items():
+                targets[key] = value[:bs]
+            sample["targets"] = targets
         batch = move_to_device(sample, device)
         loss = train_step(model, batch, loss_fn, loss_head, optimizer, scheduler)
         print(f"step {step:04d} loss {loss.item():.6f}")
