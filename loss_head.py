@@ -21,8 +21,7 @@ class LossHead(Module):
 
         Args:
             predictions: Tensor of shape (B, Nq, 13).
-            targets: Dict containing GT tensors with keys "L3D", "L2D", "Lvis",
-                "Ldisp", "Lconf", "Lnormal".
+            `targets`: dict with `xyz`, `uv_target`, `vis`, `disp`, `normal`, `conf`
 
         Returns:
             A dict of per-query loss tensors and the predicted confidence.
@@ -34,15 +33,15 @@ class LossHead(Module):
             predictions, [3, 2, 1, 3, 3, 1], dim=-1
         )
 
-        tgt_xyz = targets["L3D"].to(predictions.device)
-        tgt_uv = targets["L2D"].to(predictions.device)
-        tgt_vis = targets["Lvis"].to(predictions.device)
-        tgt_disp = targets["Ldisp"].to(predictions.device)
-        tgt_conf = targets["Lconf"].to(predictions.device)
-        tgt_normal = targets["Lnormal"].to(predictions.device)
+        tgt_xyz = targets["xyz"].to(predictions.device)
+        tgt_uv = targets["uv_target"].to(predictions.device)
+        tgt_vis = targets["vis"].to(predictions.device)
+        tgt_disp = targets["disp"].to(predictions.device)
+        tgt_conf = targets["conf"].to(predictions.device)
+        tgt_normal = targets["normal"].to(predictions.device)
 
-        pred_mean_depth = pred_xyz[..., 2].abs().mean(dim=1, keepdim=True).clamp_min(1e-6)
-        tgt_mean_depth = tgt_xyz[..., 2].abs().mean(dim=1, keepdim=True).clamp_min(1e-6)
+        pred_mean_depth = pred_xyz[..., 2:3].abs().mean(dim=1, keepdim=True).clamp_min(1e-6)
+        tgt_mean_depth = tgt_xyz[..., 2:3].abs().mean(dim=1, keepdim=True).clamp_min(1e-6)
         pred_xyz_norm = pred_xyz / pred_mean_depth
         tgt_xyz_norm = tgt_xyz / tgt_mean_depth
         pred_xyz_t = torch.sign(pred_xyz_norm) * torch.log1p(pred_xyz_norm.abs())

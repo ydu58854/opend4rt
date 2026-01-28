@@ -7,6 +7,8 @@
 # https://github.com/MCG-NJU/VideoMAE
 # https://github.com/facebookresearch/vggt
 # --------------------------------------------------------'
+from typing import cast
+
 import torch
 import torch.nn as nn
 import math
@@ -34,8 +36,8 @@ class QueryEmbedding(nn.Module):
         include_uv: bool = False,
         dropout: float = 0.0,
         image_in_chans: int = 3,          # images 的 C
-        patch_mlp_ratio: int = 4,
-        out_mlp_ratio : int = 4,
+        patch_mlp_ratio: float = 4.0,
+        out_mlp_ratio: float = 4.0,
         img_patch_sizes = (3,6,9,12,15),
     ):
         super().__init__()
@@ -124,8 +126,9 @@ class QueryEmbedding(nn.Module):
         u = uv[..., 0:1]  # (B,N,1)
         v = uv[..., 1:2]
 
-        u_proj = (2.0 * math.pi) * u * self.freq_bands.view(1, 1, -1)  # (B,N,F)
-        v_proj = (2.0 * math.pi) * v * self.freq_bands.view(1, 1, -1)
+        freq_bands = cast(torch.Tensor, self.freq_bands)
+        u_proj = (2.0 * math.pi) * u * freq_bands[None, None, :]  # (B,N,F)
+        v_proj = (2.0 * math.pi) * v * freq_bands[None, None, :]
 
         feat = torch.cat(
             [torch.sin(u_proj), torch.cos(u_proj),

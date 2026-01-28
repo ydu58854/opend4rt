@@ -28,7 +28,7 @@ class D4RTDecoder(nn.Module):
                  depth=8,
                  num_heads=12,
                  mlp_ratio=4.,
-                 qkv_bias=False,
+                 qkv_bias=True,
                  qk_scale=None,
                  drop_rate=0.,
                  attn_drop_rate=0.,
@@ -82,7 +82,7 @@ class D4RTDecoder(nn.Module):
     def get_num_layers(self):
         return len(self.blocks)
 
-    @torch.jit.ignore
+    @torch.jit.ignore()
     def no_weight_decay(self):
         return {}
 
