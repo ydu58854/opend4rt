@@ -64,7 +64,7 @@ class BaseDatasetConfig:
     split: Literal["train", "val", "test"] = "train"
     num_frames: int = 48
     num_queries: int = 2048
-    target_resolution: Tuple[int, int] = (512, 288)  # (W, H)
+    target_resolution: Tuple[int, int] = (256, 256)  # (W, H)
     normalize: bool = True
     img_patch_size: int = 3
     align_corners: bool = True

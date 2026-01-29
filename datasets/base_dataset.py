@@ -247,7 +247,7 @@ class Base4DTrajectoryDataset(Dataset, ABC):
 
         # Build meta
         meta = {
-            "aspect_ratio": float(W) / float(H),
+            "aspect_ratio": float(orig_size[0]) / float(orig_size[1]),
             "img_patch_size": self.config.img_patch_size,
             "align_corners": self.config.align_corners,
         }

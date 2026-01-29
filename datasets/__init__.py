@@ -2,7 +2,6 @@
 
 This module provides dataset implementations for D4RT training:
 
-- D4RTDataset: JSON-based dataset for pre-processed annotations
 - PointOdysseyDataset: Direct loading from PointOdyssey with trajectory annotations
 - Base4DTrajectoryDataset: Base class for 4D trajectory-based datasets
 
@@ -27,10 +26,8 @@ Usage:
     from opend4rt.datasets import Base4DTrajectoryDataset, Base4DDatasetConfig
 """
 
-# Original D4RT dataset
-from .d4rt_dataset import (
-    D4RTDataset,
-    DatasetConfig,
+# Collate utilities
+from .collate import (
     build_dataloader,
     d4rt_collate_fn,
 )
@@ -96,9 +93,7 @@ from .utils import (
 )
 
 __all__ = [
-    # Original D4RT dataset
-    "D4RTDataset",
-    "DatasetConfig",
+    # Collate
     "build_dataloader",
     "d4rt_collate_fn",
     # Base configuration classes

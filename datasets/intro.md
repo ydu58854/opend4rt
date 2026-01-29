@@ -9,8 +9,8 @@ datasets/
 ├── base_dataset.py       # 基类
 ├── pointodyssey.py       # PointOdyssey 数据集实现
 ├── trajectory_sampler.py # 查询采样器,gt计算
-├── d4rt_dataset.py       # JSON 格式数据集（原始版本）
 ├── utils.py              # 工具函数
+├── collate.py            # collate 与 DataLoader 辅助
 ├── sanity_check.py       # 无需数据的 sanity check
 ```
 
@@ -74,11 +74,10 @@ PointOdyssey 同时实现了两套加载函数：
 | `TrajectoryQuerySampler` | 多帧轨迹查询采样，支持边缘/随机采样 |
 | `SingleFrameTrajectoryQuerySampler` | 单帧查询采样 |
 
-### d4rt_dataset.py - JSON 数据集
+### collate.py - 数据拼接
 
-| 类名/函数 | 说明 |
-|-----------|------|
-| `D4RTDataset` | 从 JSON 标注文件加载数据 |
+| 函数 | 说明 |
+|------|------|
 | `d4rt_collate_fn` | DataLoader 的 collate 函数 |
 | `build_dataloader` | 快速构建 DataLoader |
 
