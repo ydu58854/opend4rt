@@ -226,6 +226,28 @@ class PointOdysseyDataset(Base4DTrajectoryDataset):
         stacked = torch.stack(frames, dim=0)  # (T, C, H, W)
         return stacked.permute(1, 0, 2, 3).contiguous()  # (C, T, H, W)
 
+    def _load_frames_raw(self, scene_id: str, frame_indices: List[int]) -> Tensor:
+        """Load RGB frames at original resolution for augmentation."""
+        scene_path = self._get_scene_path(scene_id)
+        rgb_dir = scene_path / "rgbs"
+
+        frames = []
+        for idx in frame_indices:
+            img_path = rgb_dir / f"rgb_{idx:05d}.jpg"
+
+            if not img_path.exists():
+                raise FileNotFoundError(f"RGB image not found: {img_path}")
+
+            img = load_image_tensor(
+                img_path,
+                target_size=None,
+                normalize=self.config.normalize,
+            )
+            frames.append(img)
+
+        stacked = torch.stack(frames, dim=0)  # (T, C, H, W)
+        return stacked.permute(1, 0, 2, 3).contiguous()  # (C, T, H, W)
+
     def _load_depths(
         self,
         scene_id: str,
@@ -264,6 +286,31 @@ class PointOdysseyDataset(Base4DTrajectoryDataset):
             depth_tensor = torch.from_numpy(depth)
             depth_resized = resize_depth(depth_tensor, (W, H))
             depths.append(depth_resized.numpy())
+
+        return np.stack(depths, axis=0)  # (T, H, W)
+
+    def _load_depths_raw(
+        self,
+        scene_id: str,
+        frame_indices: List[int],
+    ) -> Optional[np.ndarray]:
+        """Load depth maps at original resolution for augmentation."""
+        if not self.config.use_depth:
+            return None
+
+        scene_path = self._get_scene_path(scene_id)
+        depth_dir = scene_path / "depths"
+
+        if not depth_dir.exists():
+            return None
+
+        depths = []
+        for idx in frame_indices:
+            depth_path = depth_dir / f"depth_{idx:05d}.png"
+            if not depth_path.exists():
+                return None
+            depth = load_depth_16bit(depth_path, scale=self.config.depth_scale)
+            depths.append(depth)
 
         return np.stack(depths, axis=0)  # (T, H, W)
 
@@ -342,6 +389,49 @@ class PointOdysseyDataset(Base4DTrajectoryDataset):
             K[0, 2] *= scale_x
             K[1, 2] *= scale_y
 
+            normal = estimate_normals_from_depth(depths[t], K)
+            normals.append(normal)
+
+        return np.stack(normals, axis=0)  # (T, H, W, 3)
+
+    def _load_normals_raw(
+        self,
+        scene_id: str,
+        frame_indices: List[int],
+    ) -> Optional[np.ndarray]:
+        """Load or compute normal maps at original resolution for augmentation."""
+        if not self.config.use_normals:
+            return None
+
+        scene_path = self._get_scene_path(scene_id)
+        normal_dir = scene_path / "normals"
+
+        # First try to load precomputed normals (original resolution)
+        if normal_dir.exists():
+            normals = []
+            for idx in frame_indices:
+                normal_path = normal_dir / f"normal_{idx:05d}.jpg"
+                if normal_path.exists():
+                    normal_img = load_image(normal_path)  # (H, W, 3) in [0, 1]
+                    normal = normal_img * 2.0 - 1.0
+                    normals.append(normal)
+                else:
+                    break
+
+            if len(normals) == len(frame_indices):
+                return np.stack(normals, axis=0)
+
+        # Compute normals from depth at original resolution
+        depths = self._load_depths_raw(scene_id, frame_indices)
+        if depths is None:
+            return None
+
+        anno = self._load_anno(scene_id)
+        intrinsics = anno["intrinsics"][frame_indices]
+
+        normals = []
+        for t in range(len(frame_indices)):
+            K = intrinsics[t]
             normal = estimate_normals_from_depth(depths[t], K)
             normals.append(normal)
 

@@ -68,6 +68,20 @@ class BaseDatasetConfig:
     normalize: bool = True
     img_patch_size: int = 3
     align_corners: bool = True
+    # Temporal sampling
+    temporal_random_stride: bool = False
+    temporal_stride_min: int = 1
+    temporal_stride_max: Optional[int] = None
+    # Data augmentation
+    use_data_augmentation: bool = False
+    color_jitter: Tuple[float, float, float, float] = (0.4, 0.4, 0.4, 0.1)
+    color_drop_prob: float = 0.2
+    gaussian_blur_prob: float = 0.4
+    gaussian_blur_sigma: Tuple[float, float] = (0.1, 2.0)
+    random_crop_scale: Tuple[float, float] = (0.3, 1.0)
+    random_crop_ratio: Tuple[float, float] = (3.0 / 4.0, 4.0 / 3.0)
+    random_zoom_prob: float = 0.05
+    random_zoom_scale: Tuple[float, float] = (0.5, 0.9)
 
     def __post_init__(self):
         self.root = Path(self.root)
@@ -125,6 +139,9 @@ class PointOdysseyConfig(Base4DDatasetConfig):
     exclude_scenes: List[str] = field(default_factory=list)
     include_scenes: Optional[List[str]] = None
     depth_scale: float = 1000.0  # Official: depth_16bit / 65535.0 * 1000.0
+    # Enable augmentation + random stride by default to match D4RT training
+    temporal_random_stride: bool = True
+    use_data_augmentation: bool = True
 
     def should_include_scene(self, scene_name: str) -> bool:
         """Check if a scene should be included based on filters."""

@@ -15,6 +15,7 @@ from .utils import (
     world_to_camera,
     compute_disparity_2d,
     sobel_edge_detection,
+    compute_motion_boundaries,
 )
 
 
@@ -107,7 +108,7 @@ class TrajectoryQuerySampler:
         )
 
         # Sample query pairs following D4RT paper:
-        # - 30% from depth edges, 70% random
+        # - 30% from depth/motion edges, 70% random
         # - tsrc, ttgt sampled uniformly at random
         # - tcam = ttgt with probability 0.4, otherwise random
         n_edge = int(self.num_queries * self.edge_ratio)
@@ -115,11 +116,20 @@ class TrajectoryQuerySampler:
 
         all_queries = []
 
-        # Edge sampling (with depth edge preference)
+        # Compute motion boundaries from trajectories
+        motion_edges = compute_motion_boundaries(
+            trajs_2d_sampled,
+            valids_sampled,
+            visibs_sampled,
+            image_size=(W, H),
+            threshold=0.1,
+        )
+
+        # Edge sampling (with depth edge and motion boundary preference)
         if n_edge > 0:
             edge_queries = self._sample_edge_queries(
                 trajs_2d_sampled, valids_sampled, visibs_sampled,
-                valid_traj_mask, n_edge, W, H, orig_W, orig_H, depths
+                valid_traj_mask, n_edge, W, H, orig_W, orig_H, depths, motion_edges
             )
             all_queries.extend(edge_queries)
 
@@ -193,14 +203,16 @@ class TrajectoryQuerySampler:
         orig_W: int,
         orig_H: int,
         depths: Optional[np.ndarray] = None,
+        motion_edges: Optional[np.ndarray] = None,
     ) -> List[Tuple[int, int, int]]:
-        """Sample queries from depth edge regions.
+        """Sample queries from depth discontinuities and motion boundaries.
 
         Args:
             trajs_2d: 2D trajectories in ORIGINAL pixel coordinates.
             W, H: Target image dimensions.
             orig_W, orig_H: Original image dimensions.
             depths: Depth maps at TARGET resolution.
+            motion_edges: Motion boundary maps at TARGET resolution (T, H, W).
 
         Returns:
             List of (t_src, t_tgt, point_idx) tuples.
@@ -212,13 +224,22 @@ class TrajectoryQuerySampler:
         scale_x = W / orig_W
         scale_y = H / orig_H
 
-        # If we have depth maps, use edge detection
+        # Compute combined edge map from depth and motion
+        edges = None
+
+        # Depth edges
         if depths is not None:
             depth_tensor = torch.from_numpy(depths).float()
-            edges = sobel_edge_detection(depth_tensor, threshold=0.1)
-            edges = edges.numpy()  # (T, H, W) at target resolution
-        else:
-            edges = None
+            depth_edges = sobel_edge_detection(depth_tensor, threshold=0.1)
+            edges = depth_edges.numpy()  # (T, H, W)
+
+        # Motion edges
+        if motion_edges is not None:
+            if edges is not None:
+                # Combine depth and motion edges (logical OR)
+                edges = np.maximum(edges, motion_edges)
+            else:
+                edges = motion_edges
 
         for _ in range(num_samples):
             # Randomly select source frame
@@ -241,7 +262,7 @@ class TrajectoryQuerySampler:
                 px = np.clip(px, 0, W - 1)
                 py = np.clip(py, 0, H - 1)
 
-                # Check which points are near edges
+                # Check which points are near edges (depth OR motion boundaries)
                 edge_scores = edges[t_src, py, px]
                 edge_mask = edge_scores > 0.5
 
