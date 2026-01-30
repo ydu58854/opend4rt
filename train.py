@@ -123,6 +123,7 @@ def train_step(
     optimizer: Optimizer,
     scheduler: LambdaLR | None = None,
     max_grad_norm: float = 10.0,
+    return_grad_norm: bool = False,
 ) -> Tensor:
     """Run a single training step.
 
@@ -140,9 +141,11 @@ def train_step(
     loss = loss_fn(losses, confidence, batch["targets"].get("query_mask"))
     loss.backward()
 
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
     optimizer.step()
     if scheduler is not None:
         scheduler.step()
 
+    if return_grad_norm:
+        return loss.detach(), grad_norm.detach() if torch.is_tensor(grad_norm) else torch.tensor(float(grad_norm))
     return loss.detach()
