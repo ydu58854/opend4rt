@@ -1,11 +1,16 @@
 import math
+import os
 import sys
 from pathlib import Path
+from typing import Dict, Tuple
 
-import torch
-from torch.utils.data import DataLoader, random_split
 import hydra
+import torch
+import torch.distributed as dist
 from omegaconf import DictConfig, OmegaConf
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, random_split
+from torch.utils.data.distributed import DistributedSampler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from model import D4RT, LossHead  # type: ignore
@@ -13,26 +18,64 @@ from train import CompositeLoss, build_optimizer, build_scheduler, train_step  #
 from datasets import PointOdysseyConfig, PointOdysseyDataset, d4rt_collate_fn  # type: ignore
 
 
+# -------------------------
+# DDP helpers
+# -------------------------
+def ddp_is_enabled() -> bool:
+    return "RANK" in os.environ and "WORLD_SIZE" in os.environ
+
+
+def ddp_setup() -> Tuple[int, int, int, bool]:
+    """
+    Returns: (rank, world_size, local_rank, is_ddp)
+    """
+    if not ddp_is_enabled():
+        return 0, 1, 0, False
+
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+
+    dist.init_process_group(backend="nccl", init_method="env://")
+    torch.cuda.set_device(local_rank)
+    return rank, world_size, local_rank, True
+
+
+def ddp_cleanup():
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def is_main_process(rank: int) -> bool:
+    return rank == 0
+
+
+# -------------------------
+# Device utils
+# -------------------------
 def move_to_device(batch, device):
     meta = {}
     for key, value in batch["meta"].items():
         if torch.is_tensor(value):
-            meta[key] = value.to(device)
+            meta[key] = value.to(device, non_blocking=True)
         else:
             meta[key] = value
 
     targets = {}
     for key, value in batch["targets"].items():
-        targets[key] = value.to(device)
+        targets[key] = value.to(device, non_blocking=True)
 
     return {
         "meta": meta,
-        "images": batch["images"].to(device),
-        "query": batch["query"].to(device),
+        "images": batch["images"].to(device, non_blocking=True),
+        "query": batch["query"].to(device, non_blocking=True),
         "targets": targets,
     }
 
 
+# -------------------------
+# Logging utils
+# -------------------------
 def setup_wandb(cfg, config):
     if not cfg.wandb.use:
         return None
@@ -67,40 +110,81 @@ def setup_tensorboard(cfg):
         return None
     logdir = Path(cfg.tensorboard.logdir)
     logdir.mkdir(parents=True, exist_ok=True)
+    # 注意参数名是 log_dir
     return SummaryWriter(log_dir=str(logdir))
 
 
-def evaluate(
+# -------------------------
+# Distributed evaluation (方案 B): all_reduce sums
+# -------------------------
+@torch.no_grad()
+def evaluate_distributed(
     model,
     loader,
     loss_fn,
     loss_head,
     device,
     max_batches: int,
-):
+    is_ddp: bool,
+) -> Tuple[float, Dict[str, float]]:
+    """
+    Runs evaluation on each rank's shard (via DistributedSampler),
+    then all-reduces sums so every rank obtains the same global averages.
+    """
     model.eval()
-    total_loss = 0.0
+
+    # local accumulators
+    total_loss_sum = 0.0
     total_count = 0
-    loss_sums = {"L3D": 0.0, "L2D": 0.0, "Lvis": 0.0, "Ldisp": 0.0, "Lconf": 0.0, "Lnormal": 0.0}
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(loader):
-            if max_batches > 0 and batch_idx >= max_batches:
-                break
-            batch = move_to_device(batch, device)
-            preds = model(batch["meta"], batch["images"], batch["query"])
-            losses, conf = loss_head(preds, batch["targets"])
-            loss = loss_fn(losses, conf, batch["targets"].get("query_mask"))
-            total_loss += float(loss.item())
-            total_count += 1
-            for key in loss_sums:
-                loss_sums[key] += float(losses[key].mean().item())
-    if total_count == 0:
-        return 0.0, {k: 0.0 for k in loss_sums}
-    avg_loss = total_loss / total_count
-    avg_losses = {k: v / total_count for k, v in loss_sums.items()}
+
+    # your loss keys
+    loss_keys = ["L3D", "L2D", "Lvis", "Ldisp", "Lconf", "Lnormal"]
+    loss_sums = {k: 0.0 for k in loss_keys}
+
+    for batch_idx, batch in enumerate(loader):
+        if max_batches > 0 and batch_idx >= max_batches:
+            break
+        batch = move_to_device(batch, device)
+        preds = model(batch["meta"], batch["images"], batch["query"])
+        losses, conf = loss_head(preds, batch["targets"])
+        loss = loss_fn(losses, conf, batch["targets"].get("query_mask"))
+
+        total_loss_sum += float(loss.item())
+        total_count += 1
+        for k in loss_keys:
+            loss_sums[k] += float(losses[k].mean().item())
+
+    # pack to tensor for all_reduce
+    # [loss_sum, count, L3D_sum, L2D_sum, ...]
+    vec = torch.tensor(
+        [total_loss_sum, float(total_count)] + [loss_sums[k] for k in loss_keys],
+        device=device,
+        dtype=torch.float64,
+    )
+
+    if is_ddp:
+        dist.all_reduce(vec, op=dist.ReduceOp.SUM)
+
+    # compute global averages (same on every rank now)
+    global_loss_sum = vec[0].item()
+    global_count = int(vec[1].item())
+
+    if global_count == 0:
+        avg_loss = 0.0
+        avg_losses = {k: 0.0 for k in loss_keys}
+        return avg_loss, avg_losses
+
+    avg_loss = global_loss_sum / global_count
+    avg_losses = {}
+    for i, k in enumerate(loss_keys):
+        avg_losses[k] = vec[2 + i].item() / global_count
+
     return avg_loss, avg_losses
 
 
+# -------------------------
+# Checkpoint
+# -------------------------
 def save_checkpoint(
     checkpoint_dir: Path,
     tag: str,
@@ -112,8 +196,11 @@ def save_checkpoint(
     best_loss: float,
 ):
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    # DDP: model.module
+    state_dict = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+
     payload = {
-        "model": model.state_dict(),
+        "model": state_dict,
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict() if scheduler is not None else None,
         "step": step,
@@ -130,14 +217,30 @@ def _resolve_path(path_str: str) -> Path:
     return Path(hydra.utils.get_original_cwd()) / path
 
 
-@hydra.main(config_path="/inspire/hdd/project/wuliqifa/public/dyh/d4rt/opend4rt/configs", config_name="train_pointodyssey", version_base="1.3")
+@hydra.main(
+    config_path="/inspire/hdd/project/wuliqifa/public/dyh/d4rt/opend4rt/configs",
+    config_name="train_pointodyssey",
+    version_base="1.3",
+)
 def main(cfg: DictConfig):
+    # ---- DDP init ----
+    rank, world_size, local_rank, is_ddp = ddp_setup()
+
+    # paths
     data_root = _resolve_path(cfg.data_root)
     checkpoint_dir = _resolve_path(cfg.checkpoint_dir)
     tensorboard_logdir = _resolve_path(cfg.tensorboard.logdir)
     cfg.tensorboard.logdir = str(tensorboard_logdir)
 
-    device = torch.device(cfg.device)
+    # device (each rank -> its GPU)
+    device = torch.device("cuda", local_rank) if torch.cuda.is_available() else torch.device("cpu")
+
+    if is_main_process(rank):
+        print(f"[DDP] enabled={is_ddp} rank={rank}/{world_size} local_rank={local_rank} device={device}")
+        print(f"[cfg] data_root={data_root}")
+        print(f"[cfg] steps={cfg.steps} batch_size(per_gpu)={cfg.batch_size} num_workers={cfg.num_workers}")
+
+    # ---- model ----
     model = D4RT(
         img_size=cfg.model.img_size,
         patch_size=cfg.model.patch_size,
@@ -148,7 +251,7 @@ def main(cfg: DictConfig):
         decoder_embed_dim=cfg.model.decoder_embed_dim,
         decoder_depth=cfg.model.decoder_depth,
         decoder_num_heads=cfg.model.decoder_num_heads,
-        mlp_ratio = cfg.model.mlp_ratio,
+        mlp_ratio=cfg.model.mlp_ratio,
         all_frames=cfg.model.all_frames,
         encoder_pretrained=cfg.model.encoder_pretrained,
         encoder_pretrained_path=str(_resolve_path(cfg.model.encoder_pretrained_path)),
@@ -157,11 +260,16 @@ def main(cfg: DictConfig):
         encoder_pretrained_verbose=cfg.model.encoder_pretrained_verbose,
     ).to(device)
 
+    if is_ddp:
+        # recommended for speed if you don't have unused params
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+
     optimizer = build_optimizer(model.parameters(), lr=cfg.lr)
     scheduler = build_scheduler(optimizer, warmup_steps=2500, total_steps=max(cfg.steps, 2501))
     loss_fn = CompositeLoss()
-    loss_head = LossHead()
+    loss_head = LossHead().to(device)
 
+    # ---- dataset ----
     config = PointOdysseyConfig(
         root=str(data_root),
         split=cfg.split,
@@ -175,13 +283,21 @@ def main(cfg: DictConfig):
         config.temporal_random_stride = False
 
     dataset = PointOdysseyDataset(config)
-    # Filter out PointOdyssey scenes with 'character' prefix (NaN traj3D)
+
+    # Filter out scenes with NaN traj3D (train/character*, and also gso* if you want)
+    # 注意：只要你的 dataset.len / __getitem__ 依赖 dataset.scenes，这样做是有效的。
     before_count = len(dataset)
-    dataset.scenes = [s for s in dataset.scenes if not s["scene_id"].startswith("character") and not s["scene_id"].startswith("gso_out_big")]
-    filtered_count = len(dataset)
-    removed = before_count - filtered_count
-    if removed > 0:
-        print(f"[Dataset] filtered {removed} scenes with prefix 'character' (remaining {filtered_count}).")
+    if hasattr(dataset, "scenes"):
+        dataset.scenes = [
+            s for s in dataset.scenes
+            if (not s["scene_id"].startswith("character")) and (not s["scene_id"].startswith("gso"))
+        ]
+    after_count = len(dataset)
+    removed = before_count - after_count
+    if removed > 0 and is_main_process(rank):
+        print(f"[Dataset] filtered {removed} scenes (remaining {after_count}).")
+
+    # ---- split train/val (must be identical on every rank) ----
     val_loader = None
     if cfg.dataset.val_fraction > 0:
         total_len = len(dataset)
@@ -195,193 +311,208 @@ def main(cfg: DictConfig):
         train_dataset = dataset
         val_dataset = None
 
+    # ---- samplers ----
+    train_sampler = None
+    val_sampler = None
+    if is_ddp:
+        train_sampler = DistributedSampler(
+            train_dataset, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True
+        )
+        if val_dataset is not None:
+            val_sampler = DistributedSampler(
+                val_dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False
+            )
+
+    # ---- loaders ----
     loader = DataLoader(
         train_dataset,
-        batch_size=cfg.batch_size,
-        shuffle=True,
+        batch_size=cfg.batch_size,              # per-GPU
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
         num_workers=cfg.num_workers,
         collate_fn=d4rt_collate_fn,
         pin_memory=True,
+        persistent_workers=(cfg.num_workers > 0),
+        prefetch_factor=2 if cfg.num_workers > 0 else None,
+        drop_last=True,
     )
     if val_dataset is not None:
         val_loader = DataLoader(
             val_dataset,
             batch_size=cfg.batch_size,
             shuffle=False,
+            sampler=val_sampler,
             num_workers=cfg.num_workers,
             collate_fn=d4rt_collate_fn,
             pin_memory=True,
+            persistent_workers=(cfg.num_workers > 0),
+            prefetch_factor=2 if cfg.num_workers > 0 else None,
+            drop_last=False,
         )
 
-    wandb = setup_wandb(cfg, config)
-    writer = setup_tensorboard(cfg)
+    # ---- logging (rank0 only) ----
+    wandb = setup_wandb(cfg, config) if is_main_process(rank) else None
+    writer = setup_tensorboard(cfg) if is_main_process(rank) else None
 
+    # ---- train loop ----
     step = 0
     epoch = 0
     best_loss = math.inf
-    while step < cfg.steps:
-        for batch in loader:
-            if device.type == "cuda":
-                torch.cuda.reset_peak_memory_stats(device)
-            batch = move_to_device(batch, device)
-            loss, grad_norm, loss_stats = train_step(
-                model,
-                batch,
-                loss_fn,
-                loss_head,
-                optimizer,
-                scheduler,
-                max_grad_norm=cfg.max_grad_norm,
-                return_grad_norm=True,
-                return_losses=True,
-            )
-            if step % 10 == 0:
-                print(
-                    "step {step:06d} loss {loss:.6f} "
-                    "L3D {L3D:.4f} L2D {L2D:.4f} Lvis {Lvis:.4f} "
-                    "Ldisp {Ldisp:.4f} Lconf {Lconf:.4f} Lnormal {Lnormal:.4f}".format(
-                        step=step,
-                        loss=loss.item(),
-                        L3D=loss_stats["L3D"].item(),
-                        L2D=loss_stats["L2D"].item(),
-                        Lvis=loss_stats["Lvis"].item(),
-                        Ldisp=loss_stats["Ldisp"].item(),
-                        Lconf=loss_stats["Lconf"].item(),
-                        Lnormal=loss_stats["Lnormal"].item(),
-                    )
-                )
-            gpu_mem = None
-            gpu_mem_max = None
-            if device.type == "cuda":
-                gpu_mem = torch.cuda.memory_allocated(device) / (1024 ** 2)
-                gpu_mem_max = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-            if wandb is not None and step % cfg.wandb.log_every == 0:
-                log_payload = {
-                    "loss": loss.item(),
-                    "loss/L3D": loss_stats["L3D"].item(),
-                    "loss/L2D": loss_stats["L2D"].item(),
-                    "loss/Lvis": loss_stats["Lvis"].item(),
-                    "loss/Ldisp": loss_stats["Ldisp"].item(),
-                    "loss/Lconf": loss_stats["Lconf"].item(),
-                    "loss/Lnormal": loss_stats["Lnormal"].item(),
-                    "lr": optimizer.param_groups[0]["lr"],
-                    "best_loss": best_loss,
-                    "epoch": epoch,
-                    "grad_norm": float(grad_norm.item()),
-                }
-                if gpu_mem is not None:
-                    log_payload["gpu_mem_mb"] = gpu_mem
-                    log_payload["gpu_mem_max_mb"] = gpu_mem_max
-                wandb.log(log_payload, step=step)
-            if writer is not None and step % cfg.wandb.log_every == 0:
-                writer.add_scalar("loss", loss.item(), step)
-                writer.add_scalar("loss/L3D", loss_stats["L3D"].item(), step)
-                writer.add_scalar("loss/L2D", loss_stats["L2D"].item(), step)
-                writer.add_scalar("loss/Lvis", loss_stats["Lvis"].item(), step)
-                writer.add_scalar("loss/Ldisp", loss_stats["Ldisp"].item(), step)
-                writer.add_scalar("loss/Lconf", loss_stats["Lconf"].item(), step)
-                writer.add_scalar("loss/Lnormal", loss_stats["Lnormal"].item(), step)
-                writer.add_scalar("lr", optimizer.param_groups[0]["lr"], step)
-                writer.add_scalar("best_loss", best_loss, step)
-                writer.add_scalar("grad_norm", float(grad_norm.item()), step)
-                writer.add_scalar("epoch", epoch, step)
-                if gpu_mem is not None:
-                    writer.add_scalar("gpu/mem_mb", gpu_mem, step)
-                    writer.add_scalar("gpu/mem_max_mb", gpu_mem_max, step)
-            if cfg.save_every_steps > 0 and step % cfg.save_every_steps == 0 and step > 0:
-                save_checkpoint(
-                    checkpoint_dir,
-                    f"step_{step:06d}",
+
+    try:
+        while step < cfg.steps:
+            if is_ddp and train_sampler is not None:
+                train_sampler.set_epoch(epoch)
+
+            for batch in loader:
+                if step >= cfg.steps:
+                    break
+
+                # reset mem stats for this device (local)
+                if device.type == "cuda":
+                    torch.cuda.reset_peak_memory_stats(device)
+
+                batch = move_to_device(batch, device)
+
+                loss, grad_norm, loss_stats = train_step(
                     model,
-                    optimizer,
-                    scheduler,
-                    step,
-                    epoch,
-                    best_loss,
-                )
-                save_checkpoint(
-                    checkpoint_dir,
-                    "last",
-                    model,
-                    optimizer,
-                    scheduler,
-                    step,
-                    epoch,
-                    best_loss,
-                )
-            if loss.item() < best_loss:
-                best_loss = loss.item()
-                save_checkpoint(
-                    checkpoint_dir,
-                    "best",
-                    model,
-                    optimizer,
-                    scheduler,
-                    step,
-                    epoch,
-                    best_loss,
-                )
-            if val_loader is not None and cfg.dataset.val_every_steps > 0 and step % cfg.dataset.val_every_steps == 0 and step > 0:
-                val_loss, val_losses = evaluate(
-                    model,
-                    val_loader,
+                    batch,
                     loss_fn,
                     loss_head,
-                    device,
-                    cfg.dataset.val_max_batches,
+                    optimizer,
+                    scheduler,
+                    max_grad_norm=cfg.max_grad_norm,
+                    return_grad_norm=True,
+                    return_losses=True,
                 )
-                if wandb is not None:
-                    wandb.log(
-                        {
-                            "val/loss": val_loss,
-                            "val/L3D": val_losses["L3D"],
-                            "val/L2D": val_losses["L2D"],
-                            "val/Lvis": val_losses["Lvis"],
-                            "val/Ldisp": val_losses["Ldisp"],
-                            "val/Lconf": val_losses["Lconf"],
-                            "val/Lnormal": val_losses["Lnormal"],
-                        },
-                        step=step,
-                    )
-                if writer is not None:
-                    writer.add_scalar("val/loss", val_loss, step)
-                    writer.add_scalar("val/L3D", val_losses["L3D"], step)
-                    writer.add_scalar("val/L2D", val_losses["L2D"], step)
-                    writer.add_scalar("val/Lvis", val_losses["Lvis"], step)
-                    writer.add_scalar("val/Ldisp", val_losses["Ldisp"], step)
-                    writer.add_scalar("val/Lconf", val_losses["Lconf"], step)
-                    writer.add_scalar("val/Lnormal", val_losses["Lnormal"], step)
-            step += 1
-            if step >= cfg.steps:
-                break
-        epoch += 1
-        if cfg.save_every_epochs > 0 and epoch % cfg.save_every_epochs == 0:
-            save_checkpoint(
-                checkpoint_dir,
-                f"epoch_{epoch:04d}",
-                model,
-                optimizer,
-                scheduler,
-                step,
-                epoch,
-                best_loss,
-            )
-            save_checkpoint(
-                checkpoint_dir,
-                "last",
-                model,
-                optimizer,
-                scheduler,
-                step,
-                epoch,
-                best_loss,
-            )
 
-    if wandb is not None:
-        wandb.finish()
-    if writer is not None:
-        writer.flush()
-        writer.close()
+                # ---- print (rank0 only) ----
+                if is_main_process(rank) and step % 10 == 0:
+                    print(
+                        "step {step:06d} loss {loss:.6f} "
+                        "L3D {L3D:.4f} L2D {L2D:.4f} Lvis {Lvis:.4f} "
+                        "Ldisp {Ldisp:.4f} Lconf {Lconf:.4f} Lnormal {Lnormal:.4f}".format(
+                            step=step,
+                            loss=loss.item(),
+                            L3D=loss_stats["L3D"].item(),
+                            L2D=loss_stats["L2D"].item(),
+                            Lvis=loss_stats["Lvis"].item(),
+                            Ldisp=loss_stats["Ldisp"].item(),
+                            Lconf=loss_stats["Lconf"].item(),
+                            Lnormal=loss_stats["Lnormal"].item(),
+                        )
+                    )
+
+                gpu_mem = None
+                gpu_mem_max = None
+                if device.type == "cuda":
+                    gpu_mem = torch.cuda.memory_allocated(device) / (1024**2)
+                    gpu_mem_max = torch.cuda.max_memory_allocated(device) / (1024**2)
+
+                # ---- wandb/tb (rank0 only) ----
+                if is_main_process(rank):
+                    if wandb is not None and step % cfg.wandb.log_every == 0:
+                        log_payload = {
+                            "loss": loss.item(),
+                            "loss/L3D": loss_stats["L3D"].item(),
+                            "loss/L2D": loss_stats["L2D"].item(),
+                            "loss/Lvis": loss_stats["Lvis"].item(),
+                            "loss/Ldisp": loss_stats["Ldisp"].item(),
+                            "loss/Lconf": loss_stats["Lconf"].item(),
+                            "loss/Lnormal": loss_stats["Lnormal"].item(),
+                            "lr": optimizer.param_groups[0]["lr"],
+                            "best_loss": best_loss,
+                            "epoch": epoch,
+                            "grad_norm": float(grad_norm.item()),
+                            "global_batch": cfg.batch_size * world_size,
+                        }
+                        if gpu_mem is not None:
+                            log_payload["gpu_mem_mb"] = gpu_mem
+                            log_payload["gpu_mem_max_mb"] = gpu_mem_max
+                        wandb.log(log_payload, step=step)
+
+                    if writer is not None and step % cfg.wandb.log_every == 0:
+                        writer.add_scalar("loss", loss.item(), step)
+                        writer.add_scalar("loss/L3D", loss_stats["L3D"].item(), step)
+                        writer.add_scalar("loss/L2D", loss_stats["L2D"].item(), step)
+                        writer.add_scalar("loss/Lvis", loss_stats["Lvis"].item(), step)
+                        writer.add_scalar("loss/Ldisp", loss_stats["Ldisp"].item(), step)
+                        writer.add_scalar("loss/Lconf", loss_stats["Lconf"].item(), step)
+                        writer.add_scalar("loss/Lnormal", loss_stats["Lnormal"].item(), step)
+                        writer.add_scalar("lr", optimizer.param_groups[0]["lr"], step)
+                        writer.add_scalar("best_loss", best_loss, step)
+                        writer.add_scalar("grad_norm", float(grad_norm.item()), step)
+                        writer.add_scalar("epoch", epoch, step)
+                        if gpu_mem is not None:
+                            writer.add_scalar("gpu/mem_mb", gpu_mem, step)
+                            writer.add_scalar("gpu/mem_max_mb", gpu_mem_max, step)
+
+                # ---- checkpoint (rank0 only) ----
+                if is_main_process(rank):
+                    if cfg.save_every_steps > 0 and step % cfg.save_every_steps == 0 and step > 0:
+                        save_checkpoint(checkpoint_dir, f"step_{step:06d}", model, optimizer, scheduler, step, epoch, best_loss)
+                        save_checkpoint(checkpoint_dir, "last", model, optimizer, scheduler, step, epoch, best_loss)
+
+                    # best
+                    if loss.item() < best_loss:
+                        best_loss = loss.item()
+                        save_checkpoint(checkpoint_dir, "best", model, optimizer, scheduler, step, epoch, best_loss)
+
+                # ---- distributed eval (方案 B) ----
+                # 所有 rank 都跑各自 shard，然后 all_reduce 得到全局平均；rank0 负责记录
+                if val_loader is not None and cfg.dataset.val_every_steps > 0 and step % cfg.dataset.val_every_steps == 0 and step > 0:
+                    # val sampler 不 shuffle，所以不必 set_epoch；若你想严格同步，也可以 set_epoch(epoch)
+                    val_loss, val_losses = evaluate_distributed(
+                        model,
+                        val_loader,
+                        loss_fn,
+                        loss_head,
+                        device,
+                        cfg.dataset.val_max_batches,
+                        is_ddp=is_ddp,
+                    )
+
+                    if is_main_process(rank):
+                        if wandb is not None:
+                            wandb.log(
+                                {
+                                    "val/loss": val_loss,
+                                    "val/L3D": val_losses["L3D"],
+                                    "val/L2D": val_losses["L2D"],
+                                    "val/Lvis": val_losses["Lvis"],
+                                    "val/Ldisp": val_losses["Ldisp"],
+                                    "val/Lconf": val_losses["Lconf"],
+                                    "val/Lnormal": val_losses["Lnormal"],
+                                },
+                                step=step,
+                            )
+                        if writer is not None:
+                            writer.add_scalar("val/loss", val_loss, step)
+                            writer.add_scalar("val/L3D", val_losses["L3D"], step)
+                            writer.add_scalar("val/L2D", val_losses["L2D"], step)
+                            writer.add_scalar("val/Lvis", val_losses["Lvis"], step)
+                            writer.add_scalar("val/Ldisp", val_losses["Ldisp"], step)
+                            writer.add_scalar("val/Lconf", val_losses["Lconf"], step)
+                            writer.add_scalar("val/Lnormal", val_losses["Lnormal"], step)
+
+                step += 1
+
+            epoch += 1
+
+            # epoch checkpoint (rank0 only)
+            if is_main_process(rank) and cfg.save_every_epochs > 0 and epoch % cfg.save_every_epochs == 0:
+                save_checkpoint(checkpoint_dir, f"epoch_{epoch:04d}", model, optimizer, scheduler, step, epoch, best_loss)
+                save_checkpoint(checkpoint_dir, "last", model, optimizer, scheduler, step, epoch, best_loss)
+
+    finally:
+        # cleanup
+        if is_main_process(rank):
+            if wandb is not None:
+                wandb.finish()
+            if writer is not None:
+                writer.flush()
+                writer.close()
+        ddp_cleanup()
 
 
 if __name__ == "__main__":

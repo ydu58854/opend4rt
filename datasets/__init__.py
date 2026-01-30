@@ -50,13 +50,11 @@ from .base_dataset import (
 # PointOdyssey dataset
 from .pointodyssey import (
     PointOdysseyDataset,
-    PointOdysseySingleFrameDataset,
 )
 
 # Query samplers
 from .trajectory_sampler import (
     TrajectoryQuerySampler,
-    SingleFrameTrajectoryQuerySampler,
 )
 
 # Utilities
