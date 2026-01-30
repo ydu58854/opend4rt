@@ -133,9 +133,9 @@ def evaluate_distributed(
     """
     model.eval()
 
-    # local accumulators
+    # local accumulators (weighted by valid query count)
     total_loss_sum = 0.0
-    total_count = 0
+    total_count = 0.0
 
     # your loss keys
     loss_keys = ["L3D", "L2D", "Lvis", "Ldisp", "Lconf", "Lnormal"]
@@ -147,12 +147,23 @@ def evaluate_distributed(
         batch = move_to_device(batch, device)
         preds = model(batch["meta"], batch["images"], batch["query"])
         losses, conf = loss_head(preds, batch["targets"])
-        loss = loss_fn(losses, conf, batch["targets"].get("query_mask"))
+        query_mask = batch["targets"].get("query_mask")
+        loss = loss_fn(losses, conf, query_mask)
 
-        total_loss_sum += float(loss.item())
-        total_count += 1
-        for k in loss_keys:
-            loss_sums[k] += float(losses[k].mean().item())
+        if query_mask is not None:
+            mask = query_mask.unsqueeze(-1).to(device=device, dtype=losses["L3D"].dtype)
+            denom = float(mask.sum().item())
+            if denom <= 0:
+                continue
+            total_loss_sum += float(loss.item()) * denom
+            total_count += denom
+            for k in loss_keys:
+                loss_sums[k] += float((losses[k] * mask).sum().item())
+        else:
+            total_loss_sum += float(loss.item())
+            total_count += 1.0
+            for k in loss_keys:
+                loss_sums[k] += float(losses[k].mean().item())
 
     # pack to tensor for all_reduce
     # [loss_sum, count, L3D_sum, L2D_sum, ...]
@@ -167,7 +178,7 @@ def evaluate_distributed(
 
     # compute global averages (same on every rank now)
     global_loss_sum = vec[0].item()
-    global_count = int(vec[1].item())
+    global_count = float(vec[1].item())
 
     if global_count == 0:
         avg_loss = 0.0
@@ -261,8 +272,9 @@ def main(cfg: DictConfig):
     ).to(device)
 
     if is_ddp:
-        # recommended for speed if you don't have unused params
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+        # QueryEmbedding uses a single img_patch_size per batch, leaving other patch MLPs unused.
+        # Enable unused-parameter detection to avoid DDP reduction errors.
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
     optimizer = build_optimizer(model.parameters(), lr=cfg.lr)
     scheduler = build_scheduler(optimizer, warmup_steps=2500, total_steps=max(cfg.steps, 2501))

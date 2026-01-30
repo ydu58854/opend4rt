@@ -148,8 +148,14 @@ def train_step(
         scheduler.step()
 
     if return_losses:
-        # Return unweighted per-task losses (mean over all queries)
-        loss_stats = {k: v.detach().mean() for k, v in losses.items()}
+        # Return per-task losses averaged over valid queries if query_mask is provided.
+        query_mask = batch["targets"].get("query_mask")
+        if query_mask is not None:
+            mask = query_mask.unsqueeze(-1).to(device=predictions.device, dtype=losses["L3D"].dtype)
+            denom = mask.sum().clamp_min(1.0)
+            loss_stats = {k: (v * mask).sum().detach() / denom for k, v in losses.items()}
+        else:
+            loss_stats = {k: v.detach().mean() for k, v in losses.items()}
         return (
             loss.detach(),
             grad_norm.detach() if torch.is_tensor(grad_norm) else torch.tensor(float(grad_norm)),
