@@ -38,7 +38,7 @@ class D4RT(nn.Module):
         decoder_embed_dim=768,
         decoder_depth=8,
         decoder_num_heads=8,
-        mlp_ratio=48/11,
+        mlp_ratio=4.,
         qkv_bias=True,
         qk_scale=None,
         drop_rate=0.,
@@ -58,7 +58,7 @@ class D4RT(nn.Module):
         encoder_pretrained: bool = True ,
         encoder_pretrained_path: str = "/inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint",   # 传入 ckpt 路径
         encoder_pretrained_variant: str = "vit-b",
-        encoder_pretrained_strict: bool = False,
+        encoder_pretrained_strict: bool = True,
         encoder_pretrained_verbose: bool = True,
     ):
         super().__init__()
@@ -109,7 +109,7 @@ class D4RT(nn.Module):
             img_patch_sizes = img_patch_sizes,
         )
         if encoder_pretrained:
-            load_result, skipped = self.encoder.load_videomae_encoder(
+            load_result, info = self.encoder.load_videomae_encoder(
                 encoder_pretrained_path,
                 variant=encoder_pretrained_variant,
                 strict=encoder_pretrained_strict,
@@ -117,9 +117,24 @@ class D4RT(nn.Module):
             if encoder_pretrained_verbose:
                 # load_result 是 IncompatibleKeys(missing_keys, unexpected_keys)
                 print("[Encoder pretrained] load_result:", load_result)
-                if skipped:
-                    print(f"[Encoder pretrained] skipped {len(skipped)} keys (e.g. first 20):")
-                    print(skipped[:20])
+                if info:
+                    err_count = info.get("error_count", 0)
+                    miss_count = info.get("missing_expected_count", 0)
+                    loaded_count = info.get("loaded_count", 0)
+                    ignored_count = info.get("ignored_count", 0)
+                    print(
+                        "[Encoder pretrained] info:",
+                        f"loaded={loaded_count}, ignored={ignored_count}, "
+                        f"errors={err_count}, missing_expected={miss_count}"
+                    )
+                    if info.get("error_samples"):
+                        print("[Encoder pretrained] error_samples (first 20):")
+                        for item in info["error_samples"]:
+                            print(f"  - {item}")
+                    if info.get("missing_expected_samples"):
+                        print("[Encoder pretrained] missing_expected_samples (first 20):")
+                        for item in info["missing_expected_samples"]:
+                            print(f"  - {item}")
 
 
     def _init_weights(self, m):

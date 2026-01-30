@@ -3,7 +3,7 @@ model:
   variant: vit-b
   img_size: 256
   patch_size: 16
-  mlp_ratio: 4
+  mlp_ratio: 4.0
   encoder_in_chans: 3
   encoder_embed_dim: 768
   encoder_depth: 12

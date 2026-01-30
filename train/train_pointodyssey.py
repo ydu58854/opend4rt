@@ -168,6 +168,7 @@ def main(cfg: DictConfig):
         num_frames=cfg.dataset.num_frames,
         num_queries=cfg.dataset.num_queries,
     )
+    config.img_patch_size = int(cfg.img_patch_size)
     if cfg.dataset.no_aug:
         config.use_data_augmentation = False
     if cfg.dataset.no_random_stride:
@@ -215,7 +216,6 @@ def main(cfg: DictConfig):
         for batch in loader:
             if device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(device)
-            batch["meta"]["img_patch_size"] = int(cfg.img_patch_size)
             batch = move_to_device(batch, device)
             loss, grad_norm, loss_stats = train_step(
                 model,

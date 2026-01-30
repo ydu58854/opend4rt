@@ -386,6 +386,25 @@ class D4RTEncoder(nn.Module):
                 if len(missing_expected) > 80:
                     msg.append("... (truncated)")
             raise RuntimeError("\n".join(msg))
+        elif not strict and (errors or missing_expected):
+            print(
+                "[Encoder pretrained][WARN] non-strict load has mismatches: "
+                f"errors={len(errors)}, missing_expected={len(missing_expected)}"
+            )
+            if errors:
+                preview = errors[:20]
+                print("[Encoder pretrained][WARN] error samples:")
+                for item in preview:
+                    print(f"  - {item}")
+                if len(errors) > len(preview):
+                    print("  ... (truncated)")
+            if missing_expected:
+                preview = missing_expected[:20]
+                print("[Encoder pretrained][WARN] missing_expected samples:")
+                for item in preview:
+                    print(f"  - {item}")
+                if len(missing_expected) > len(preview):
+                    print("  ... (truncated)")
 
         load_res = self.load_state_dict(remapped, strict=False)
         info = {
@@ -402,7 +421,7 @@ class D4RTEncoder(nn.Module):
 
 
 
-    def load_videomae_encoder(self, checkpoint_path: str, variant: str = "vit-b", strict: bool = False):
+    def load_videomae_encoder(self, checkpoint_path: str, variant: str = "vit-b", strict: bool = True):
         if variant == "vit-b":
             checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-b","pytorch_model.bin")
             return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)

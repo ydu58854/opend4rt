@@ -40,10 +40,26 @@ def d4rt_collate_fn(batch: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "query_mask": query_mask,
     }
 
+    def _as_scalar(value):
+        if torch.is_tensor(value):
+            if value.numel() != 1:
+                raise ValueError(f"Expected scalar meta value, got shape {tuple(value.shape)}")
+            return value.item()
+        return value
+
+    aspect_vals = [float(_as_scalar(m["aspect_ratio"])) for m in metas]
+    img_patch_vals = [int(_as_scalar(m["img_patch_size"])) for m in metas]
+    align_vals = [bool(_as_scalar(m["align_corners"])) for m in metas]
+
+    if len(set(img_patch_vals)) != 1:
+        raise ValueError(f"img_patch_size must be identical across batch, got {img_patch_vals}")
+    if len(set(align_vals)) != 1:
+        raise ValueError(f"align_corners must be identical across batch, got {align_vals}")
+
     meta_batch = {
-        "aspect_ratio": torch.tensor([m["aspect_ratio"] for m in metas], dtype=torch.float32),
-        "img_patch_size": torch.tensor([m["img_patch_size"] for m in metas], dtype=torch.int64),
-        "align_corners": torch.tensor([m["align_corners"] for m in metas], dtype=torch.bool),
+        "aspect_ratio": torch.tensor(aspect_vals, dtype=torch.float32).view(len(batch), 1),
+        "img_patch_size": img_patch_vals[0],
+        "align_corners": align_vals[0],
     }
 
     return {
