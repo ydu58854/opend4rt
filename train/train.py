@@ -18,7 +18,7 @@ from torch.nn import Module
 from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
-from loss_head import LossHead
+from model import LossHead
 
 
 @dataclass(frozen=True)

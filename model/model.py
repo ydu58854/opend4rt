@@ -12,15 +12,15 @@ from functools import partial
 import torch
 import torch.nn as nn
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
-from modules import (
+from .modules import (
     Block,
     PatchEmbed,
     _cfg,
     get_sinusoid_encoding_table,
 )
-from encoder import D4RTEncoder
-from decoder import D4RTDecoder
-from query_embed import QueryEmbedding
+from .encoder import D4RTEncoder
+from .decoder import D4RTDecoder
+from .query_embed import QueryEmbedding
 def trunc_normal_(tensor, mean=0., std=1.):
     __call_trunc_normal_(tensor, mean=mean, std=std, a=-std, b=std)
 class D4RT(nn.Module):

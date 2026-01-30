@@ -1,9 +1,12 @@
 import argparse
 import os
+import sys
+from pathlib import Path
+
 import torch
 
-from encoder import D4RTEncoder
-from model import D4RT
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from model import D4RT, D4RTEncoder  # type: ignore
 
 
 def build_encoder(args):
@@ -124,13 +127,12 @@ def main():
         args.img_size,
         device=device,
     )
-    ar = float(args.img_size) / float(args.img_size)
-    ar=torch.tensor([ar], device=device)
-    ar = ar.reshape(args.batch_size, 1)
+    ar_value = float(args.img_size) / float(args.img_size)
+    ar = torch.full((args.batch_size, 1), ar_value, device=device)
     meta = {
         "aspect_ratio": ar,
-        "img_patch_size": int(args.img_patch_size),
-        "align_corners": bool(args.align_corners),
+        "img_patch_size": torch.tensor([args.img_patch_size], dtype=torch.int64, device=device),
+        "align_corners": torch.tensor([args.align_corners], dtype=torch.bool, device=device),
     }
 
     if args.run_d4rt:

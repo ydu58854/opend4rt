@@ -1,5 +1,10 @@
+import sys
+from pathlib import Path
+
 import torch
-from encoder import D4RTEncoder
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from model import D4RTEncoder  # type: ignore
 
 ckpt = "/Users/kynyty04/Desktop/opend4rt/checkpoint/pytorch_model.bin"
 

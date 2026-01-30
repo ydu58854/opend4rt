@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
 import math
-from modules import (
+from .modules import (
     Block,
     PatchEmbed,
     _cfg,

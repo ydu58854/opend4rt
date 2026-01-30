@@ -1,11 +1,13 @@
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from datasets.utils import load_image_tensor
-from model import D4RT
+from model import D4RT  # type: ignore
 
 
 def load_frames(scene_dir: Path, target_resolution, normalize: bool = True):

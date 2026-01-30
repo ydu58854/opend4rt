@@ -7,17 +7,10 @@ from torch.utils.data import DataLoader, random_split
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-if __package__ is None:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from loss_head import LossHead  # type: ignore
-    from model import D4RT  # type: ignore
-    from train import CompositeLoss, build_optimizer, build_scheduler, train_step  # type: ignore
-    from datasets import PointOdysseyConfig, PointOdysseyDataset, d4rt_collate_fn  # type: ignore
-else:
-    from .loss_head import LossHead
-    from .model import D4RT
-    from .train import CompositeLoss, build_optimizer, build_scheduler, train_step
-    from .datasets import PointOdysseyConfig, PointOdysseyDataset, d4rt_collate_fn
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from model import D4RT, LossHead  # type: ignore
+from train import CompositeLoss, build_optimizer, build_scheduler, train_step  # type: ignore
+from datasets import PointOdysseyConfig, PointOdysseyDataset, d4rt_collate_fn  # type: ignore
 
 
 def move_to_device(batch, device):
@@ -137,7 +130,7 @@ def _resolve_path(path_str: str) -> Path:
     return Path(hydra.utils.get_original_cwd()) / path
 
 
-@hydra.main(config_path="configs", config_name="train_pointodyssey", version_base="1.3")
+@hydra.main(config_path="../configs", config_name="train_pointodyssey", version_base="1.3")
 def main(cfg: DictConfig):
     data_root = _resolve_path(cfg.data_root)
     checkpoint_dir = _resolve_path(cfg.checkpoint_dir)

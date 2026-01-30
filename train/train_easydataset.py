@@ -1,13 +1,14 @@
 import math
+import sys
 from pathlib import Path
 
 import torch
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from loss_head import LossHead
-from model import D4RT
-from train import CompositeLoss, build_optimizer, build_scheduler, train_step
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from model import D4RT, LossHead  # type: ignore
+from train import CompositeLoss, build_optimizer, build_scheduler, train_step  # type: ignore
 
 
 def move_to_device(batch, device):
@@ -93,7 +94,7 @@ def _resolve_path(path_str: str) -> Path:
     return Path(hydra.utils.get_original_cwd()) / path
 
 
-@hydra.main(config_path="configs", config_name="train_easydataset", version_base="1.3")
+@hydra.main(config_path="../configs", config_name="train_easydataset", version_base="1.3")
 def main(cfg: DictConfig):
     data_dir = _resolve_path(cfg.data_dir)
     checkpoint_dir = _resolve_path(cfg.checkpoint_dir)
