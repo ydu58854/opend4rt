@@ -1,0 +1,17 @@
+model:
+  name: vit_b
+  variant: vit-b
+  img_size: 256
+  patch_size: 16
+  encoder_in_chans: 3
+  encoder_embed_dim: 768
+  encoder_depth: 12
+  encoder_num_heads: 12
+  decoder_embed_dim: 768
+  decoder_depth: 8
+  decoder_num_heads: 8
+  encoder_pretrained: false
+  encoder_pretrained_path: /inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint
+  encoder_pretrained_variant: vit-b
+  encoder_pretrained_strict: false
+  encoder_pretrained_verbose: true

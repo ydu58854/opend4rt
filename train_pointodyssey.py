@@ -4,7 +4,6 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
@@ -68,6 +67,11 @@ def setup_wandb(cfg, config):
 def setup_tensorboard(cfg):
     if not cfg.tensorboard.use:
         return None
+    try:
+        from torch.utils.tensorboard import SummaryWriter  # type: ignore
+    except Exception as exc:
+        print(f"[tensorboard] disabled (import failed): {exc}")
+        return None
     logdir = Path(cfg.tensorboard.logdir)
     logdir.mkdir(parents=True, exist_ok=True)
     return SummaryWriter(logdir=str(logdir))
@@ -113,9 +117,19 @@ def main(cfg: DictConfig):
     model = D4RT(
         img_size=cfg.model.img_size,
         patch_size=cfg.model.patch_size,
-        all_frames=cfg.model.all_frames,
+        encoder_in_chans=cfg.model.encoder_in_chans,
+        encoder_embed_dim=cfg.model.encoder_embed_dim,
         encoder_depth=cfg.model.encoder_depth,
+        encoder_num_heads=cfg.model.encoder_num_heads,
+        decoder_embed_dim=cfg.model.decoder_embed_dim,
+        decoder_depth=cfg.model.decoder_depth,
+        decoder_num_heads=cfg.model.decoder_num_heads,
+        all_frames=cfg.model.all_frames,
         encoder_pretrained=cfg.model.encoder_pretrained,
+        encoder_pretrained_path=str(_resolve_path(cfg.model.encoder_pretrained_path)),
+        encoder_pretrained_variant=cfg.model.encoder_pretrained_variant,
+        encoder_pretrained_strict=cfg.model.encoder_pretrained_strict,
+        encoder_pretrained_verbose=cfg.model.encoder_pretrained_verbose,
     ).to(device)
 
     optimizer = build_optimizer(model.parameters(), lr=cfg.lr)

@@ -1,5 +1,9 @@
 # Hydra config for PointOdyssey training
 
+defaults:
+  - model: vit_b
+  - _self_
+
 data_root: /path/to/pointodyssey
 split: train
 
@@ -15,13 +19,6 @@ checkpoint_dir: checkpoints_pointodyssey
 save_every_steps: 1000
 save_every_epochs: 1
 
-model:
-  img_size: 256
-  patch_size: 16
-  all_frames: 48
-  encoder_depth: 12
-  encoder_pretrained: false
-
 dataset:
   num_frames: 48
   num_queries: 2048
@@ -29,7 +26,7 @@ dataset:
   no_random_stride: false
 
 wandb:
-  use: true
+  use: false
   project: opend4rt
   entity: null
   name: null
@@ -39,5 +36,5 @@ wandb:
   log_every: 10
 
 tensorboard:
-  use: true
+  use: false
   logdir: runs/pointodyssey

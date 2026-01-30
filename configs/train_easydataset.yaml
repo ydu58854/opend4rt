@@ -1,5 +1,9 @@
 # Hydra config for easydataset training
 
+defaults:
+  - model: vit_b
+  - _self_
+
 data_dir: /inspire/hdd/project/wuliqifa/public/dyh/d4rt/easydataset
 
 device: cuda
@@ -11,13 +15,6 @@ max_grad_norm: 10.0
 
 checkpoint_dir: checkpoints_easydataset
 save_every_steps: 1000
-
-model:
-  img_size: 256
-  patch_size: 16
-  all_frames: 48
-  encoder_depth: 12
-  encoder_pretrained: false
 
 wandb:
   use: false

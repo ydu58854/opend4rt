@@ -208,8 +208,18 @@ class D4RTEncoder(nn.Module):
 
     def load_videomae_encoder(self, checkpoint_path: str, variant: str = "vit-b", strict: bool = False):
         if variant == "vit-b":
-            checkpoint_path = os.path.join(checkpoint_path,"vit-b","pytorch_model.bin")
+            checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-b","pytorch_model.bin")
             return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)
+        elif variant == "vit-l":
+            checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-l","pytorch_model.bin")
+            return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)
+        elif variant == "vit-h":
+            checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-h","pytorch_model.bin")
+            return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)
+        elif variant == "vit-g":
+            checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-g","vit_g_hybrid_pt_1200e.pth")
+            return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)
+            
         raise ValueError(f"Unsupported VideoMAE variant: {variant}")
 
 
