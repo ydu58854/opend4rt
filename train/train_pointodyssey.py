@@ -175,6 +175,13 @@ def main(cfg: DictConfig):
         config.temporal_random_stride = False
 
     dataset = PointOdysseyDataset(config)
+    # Filter out PointOdyssey scenes with 'character' prefix (NaN traj3D)
+    before_count = len(dataset)
+    dataset.scenes = [s for s in dataset.scenes if not s["scene_id"].startswith("character") and not s["scene_id"].startswith("gso_out_big")]
+    filtered_count = len(dataset)
+    removed = before_count - filtered_count
+    if removed > 0:
+        print(f"[Dataset] filtered {removed} scenes with prefix 'character' (remaining {filtered_count}).")
     val_loader = None
     if cfg.dataset.val_fraction > 0:
         total_len = len(dataset)
