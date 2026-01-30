@@ -3,6 +3,7 @@ model:
   variant: vit-g
   img_size: 256
   patch_size: 16
+  mlp_ratio: 4.363636363636363        #48/11
   encoder_in_chans: 3
   encoder_embed_dim: 1408
   encoder_depth: 40

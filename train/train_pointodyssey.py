@@ -148,6 +148,7 @@ def main(cfg: DictConfig):
         decoder_embed_dim=cfg.model.decoder_embed_dim,
         decoder_depth=cfg.model.decoder_depth,
         decoder_num_heads=cfg.model.decoder_num_heads,
+        mlp_ratio = cfg.model.mlp_ratio,
         all_frames=cfg.model.all_frames,
         encoder_pretrained=cfg.model.encoder_pretrained,
         encoder_pretrained_path=str(_resolve_path(cfg.model.encoder_pretrained_path)),

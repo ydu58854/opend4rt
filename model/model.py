@@ -38,7 +38,7 @@ class D4RT(nn.Module):
         decoder_embed_dim=768,
         decoder_depth=8,
         decoder_num_heads=8,
-        mlp_ratio=4.,
+        mlp_ratio=48/11,
         qkv_bias=True,
         qk_scale=None,
         drop_rate=0.,

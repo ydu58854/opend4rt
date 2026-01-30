@@ -10,9 +10,11 @@
 from functools import partial
 from typing import cast
 import os
+import re
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as cp
+import torch.nn.functional as F
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 from .modules import (
     Block,
@@ -53,6 +55,8 @@ class D4RTEncoder(nn.Module):
         assert(depth%2==0)
         self.aa_num=depth//2
         self.aa_order=aa_order
+        if depth == 40:
+            mlp_ratio = 48/11           #只有vit-g的mlp_ratio和另外的不同
         self.depth=depth
         self.tubelet_size = tubelet_size
         self.aspect_ratio_fc = nn.Linear(1, embed_dim)          # ar 和 register
@@ -113,7 +117,7 @@ class D4RTEncoder(nn.Module):
         # for name, value in (("_resnet_mean", _RESNET_MEAN), ("_resnet_std", _RESNET_STD)):
         #     self.register_buffer(name, torch.FloatTensor(value).view(1, 1, 3, 1, 1), persistent=False)
             
-        self.norm = norm_layer(embed_dim)
+        self.fc_norm = norm_layer(embed_dim)
 
 
         if use_learnable_pos_emb:
@@ -138,55 +142,264 @@ class D4RTEncoder(nn.Module):
         return {'pos_embed'}         
 
 
+    def load_videomae_vit_encoder(self, checkpoint_path: str, strict: bool = True):
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        sd = ckpt.get("state_dict") or ckpt.get("model") or ckpt.get("module") or ckpt
 
-    def load_videomae_vit_encoder(self, checkpoint_path: str, strict: bool = False):
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        state_dict = checkpoint.get("module") or checkpoint.get("state_dict") or checkpoint.get("model") or checkpoint
+        def strip_prefix(k: str) -> str:
+            for p in ("module.", "model.", "encoder.", "backbone."):
+                if k.startswith(p):
+                    k = k[len(p):]
+            return k
+
+        allowed_block_suffixes = {
+            "attn.proj.bias",
+            "attn.proj.weight",
+            "attn.q_bias",
+            "attn.qkv.weight",
+            "attn.v_bias",
+            "mlp.fc1.bias",
+            "mlp.fc1.weight",
+            "mlp.fc2.bias",
+            "mlp.fc2.weight",
+            "norm1.bias",
+            "norm1.weight",
+            "norm2.bias",
+            "norm2.weight",
+        }
+        allowed_top_level = {
+            "fc_norm.bias",
+            "fc_norm.weight",
+            "norm.bias",
+            "norm.weight",
+            "patch_embed.proj.bias",
+            "patch_embed.proj.weight",
+        }
+
+        block_re = re.compile(r"^blocks\.(\d+)\.(.+)$")
+
+        if not (hasattr(self, "frame_blocks") and hasattr(self, "global_blocks")):
+            raise RuntimeError("Target encoder must have `frame_blocks` and `global_blocks` for interleaved mapping.")
+
+        target_sd = self.state_dict()
+
+        def map_block_idx(k: int):
+            return ("frame_blocks", k // 2) if (k % 2 == 0) else ("global_blocks", k // 2)
+
+        def accept(new_key: str, tensor: torch.Tensor, src_key: str):
+            if new_key not in target_sd:
+                return False, f"{src_key} -> {new_key} (missing in target)"
+            if tuple(tensor.shape) != tuple(target_sd[new_key].shape):
+                return False, (
+                    f"{src_key} -> {new_key} "
+                    f"(shape ckpt {tuple(tensor.shape)} != tgt {tuple(target_sd[new_key].shape)})"
+                )
+            return True, ""
+
+        @torch.no_grad()
+        def resize_patch_embed_weight_3d(w: torch.Tensor, target_hw: int):
+            """
+            w: [Cout, Cin, T, H, W]  (Conv3d kernel)
+            仅对 H,W 做插值 resize 到 target_hw x target_hw
+            """
+            assert w.ndim == 5, f"patch_embed.proj.weight must be 5D, got {w.ndim}"
+            Cout, Cin, T, H, W = w.shape
+            if H == target_hw and W == target_hw:
+                return w
+            if H != W:
+                raise ValueError(f"Only supports square kernels, got H={H}, W={W}")
+
+            # (Cout,Cin,T,H,W) -> (Cout*Cin*T, 1, H, W)
+            w2 = w.contiguous().view(Cout * Cin * T, 1, H, W)
+
+            # bicubic 插值到目标大小
+            w2 = F.interpolate(w2, size=(target_hw, target_hw), mode="bicubic", align_corners=False)
+
+            # -> (Cout,Cin,T,target_hw,target_hw)
+            w2 = w2.view(Cout, Cin, T, target_hw, target_hw).contiguous()
+            return w2
+
         remapped = {}
-        skipped = []
+        ignored = []
+        errors = []
+        loaded = []
 
+        for k, v in sd.items():
+            k0 = strip_prefix(k)
 
-        for key, value in state_dict.items():
-            if key.startswith("backbone."):
-                key = key[len("backbone."):]
-
-            if key.startswith("blocks."):
-                parts = key.split(".")
-                block_idx = int(parts[1])
-                suffix = ".".join(parts[2:])
-                target_idx = block_idx // 2
-                if block_idx % 2 == 0:
-                    if target_idx >= len(self.frame_blocks):
-                        skipped.append(key)
+            # 顶层 4 个
+            if k0 in allowed_top_level:
+                # ====== 仅改 patch_embed 的逻辑开始 ======
+                if k0 == "patch_embed.proj.weight":
+                    if k0 not in target_sd:
+                        errors.append(f"{k0} -> {k0} (missing in target)")
                         continue
-                    if suffix in ("attn.q_bias", "attn.v_bias"):
-                        if getattr(self.frame_blocks[target_idx].attn, "q_bias", None) is None:
-                            skipped.append(key)
+
+                    tgt = target_sd[k0]
+                    # 允许：只差 H,W 的情况，做插值再加载
+                    if tuple(v.shape) != tuple(tgt.shape):
+                        # 期望都是 5D: [Cout, Cin, T, H, W]
+                        if v.ndim == 5 and tgt.ndim == 5 and tuple(v.shape[:3]) == tuple(tgt.shape[:3]):
+                            tgt_h, tgt_w = int(tgt.shape[-2]), int(tgt.shape[-1])
+                            if tgt_h == tgt_w:
+                                try:
+                                    v_resized = resize_patch_embed_weight_3d(v, target_hw=tgt_h)
+                                except Exception as e:
+                                    errors.append(f"{k0} (resize failed: {e})")
+                                    continue
+
+                                # resize 后再做最终 shape 校验
+                                if tuple(v_resized.shape) != tuple(tgt.shape):
+                                    errors.append(
+                                        f"{k0} (after resize shape {tuple(v_resized.shape)} != tgt {tuple(tgt.shape)})"
+                                    )
+                                    continue
+
+                                remapped[k0] = v_resized
+                                loaded.append(f"{k0} (resized {tuple(v.shape[-2:])} -> {tuple(tgt.shape[-2:])})")
+                                continue
+                            else:
+                                errors.append(f"{k0} (target kernel not square: {tgt_h}x{tgt_w})")
+                                continue
+                        else:
+                            errors.append(
+                                f"{k0} (unsupported shape mismatch: ckpt {tuple(v.shape)} vs tgt {tuple(tgt.shape)})"
+                            )
                             continue
-                    new_key = f"frame_blocks.{target_idx}.{suffix}"
+
+                    # shape 一致则正常加载
+                    remapped[k0] = v
+                    loaded.append(k0)
+                    continue
+
+                # bias 仍然严格匹配
+                if k0 == "patch_embed.proj.bias":
+                    ok, why = accept(k0, v, k0)
+                    if ok:
+                        remapped[k0] = v
+                        loaded.append(k0)
+                    else:
+                        errors.append(why)
+                    continue
+                # ====== 仅改 patch_embed 的逻辑结束 ======
+                
+                if k0.startswith("norm."):
+                    # 优先直接加载到 norm.*（如果目标确实有）
+                    if k0 in target_sd:
+                        ok, why = accept(k0, v, k0)
+                        if ok:
+                            remapped[k0] = v
+                            loaded.append(k0)
+                        else:
+                            errors.append(why)
+                        continue
+
+                    # 否则尝试映射到 fc_norm.*
+                    k1 = "fc_norm." + k0[len("norm."):]  # norm.weight -> fc_norm.weight
+                    ok, why = accept(k1, v, k0)
+                    if ok:
+                        remapped[k1] = v
+                        loaded.append(f"{k0} -> {k1}")
+                    else:
+                        errors.append(why)
+                    continue
+
+                # fc_norm.* 维持原逻辑：严格匹配
+                ok, why = accept(k0, v, k0)
+                if ok:
+                    remapped[k0] = v
+                    loaded.append(k0)
                 else:
-                    if target_idx >= len(self.global_blocks):
-                        skipped.append(key)
+                    errors.append(why)
+                continue
+
+            # blocks.N.suffix
+            m = block_re.match(k0)
+            if m:
+                bidx = int(m.group(1))
+                suffix = m.group(2)
+
+                if suffix not in allowed_block_suffixes:
+                    ignored.append(k0)
+                    continue
+
+                dst_list, dst_i = map_block_idx(bidx)
+
+                # 越界硬错误
+                if dst_list == "frame_blocks" and dst_i >= len(self.frame_blocks):
+                    errors.append(f"{k0} -> {dst_list}.{dst_i}.{suffix} (OOR: len(frame_blocks)={len(self.frame_blocks)})")
+                    continue
+                if dst_list == "global_blocks" and dst_i >= len(self.global_blocks):
+                    errors.append(f"{k0} -> {dst_list}.{dst_i}.{suffix} (OOR: len(global_blocks)={len(self.global_blocks)})")
+                    continue
+
+                new_key = f"{dst_list}.{dst_i}.{suffix}"
+
+                # ✅ q_bias / v_bias 的正确逻辑：目标有没有注册决定能不能加载
+                if suffix in ("attn.q_bias", "attn.v_bias"):
+                    if new_key not in target_sd:
+                        if strict:
+                            errors.append(f"{k0} -> {new_key} (target has no q_bias/v_bias; did you set qkv_bias=False?)")
+                        else:
+                            ignored.append(k0)
                         continue
-                    if suffix in ("attn.q_bias", "attn.v_bias"):
-                        if getattr(self.global_blocks[target_idx].attn, "q_bias", None) is None:
-                            skipped.append(key)
-                            continue
-                    new_key = f"global_blocks.{target_idx}.{suffix}"
-                remapped[new_key] = value
+
+                ok, why = accept(new_key, v, k0)
+                if ok:
+                    remapped[new_key] = v
+                    loaded.append(f"{k0} -> {new_key}")
+                else:
+                    errors.append(why)
                 continue
 
-            if key.startswith("patch_embed."):
-                remapped[key] = value
-                continue
+            # 其它一律忽略
+            ignored.append(k0)
 
-            if key.startswith("norm."):
-                remapped[key] = value
-                continue
+        # ===== 反向 expected 检查：如果目标里有 q_bias/v_bias，就要求都加载到 =====
+        expected = set(allowed_top_level)
+
+        fixed_suffixes = allowed_block_suffixes
+        for i in range(len(self.frame_blocks)):
+            for suf in fixed_suffixes:
+                kexp = f"frame_blocks.{i}.{suf}"
+                if kexp in target_sd:
+                    expected.add(kexp)
+        for i in range(len(self.global_blocks)):
+            for suf in fixed_suffixes:
+                kexp = f"global_blocks.{i}.{suf}"
+                if kexp in target_sd:
+                    expected.add(kexp)
+
+        expected_in_target = [k for k in expected if k in target_sd]
+        missing_expected = [k for k in expected_in_target if k not in remapped]
+
+        if strict and (errors or missing_expected):
+            msg = ["Strict interleaved VideoMAE encoder load FAILED."]
+            if errors:
+                msg.append(f"\n[Errors] ({len(errors)})")
+                msg.extend(errors[:80])
+                if len(errors) > 80:
+                    msg.append("... (truncated)")
+            if missing_expected:
+                msg.append(f"\n[Expected but not loaded] ({len(missing_expected)})")
+                msg.extend(missing_expected[:80])
+                if len(missing_expected) > 80:
+                    msg.append("... (truncated)")
+            raise RuntimeError("\n".join(msg))
+
+        load_res = self.load_state_dict(remapped, strict=False)
+        info = {
+            "loaded_count": len(loaded),
+            "ignored_count": len(ignored),
+            "error_count": len(errors),
+            "missing_expected_count": len(missing_expected),
+            "loaded_samples": loaded[:20],
+            "error_samples": errors[:20],
+            "missing_expected_samples": missing_expected[:20],
+        }
+        return load_res, info
 
 
-        load_result = self.load_state_dict(remapped, strict=strict)
-        return load_result, skipped
 
 
     def load_videomae_encoder(self, checkpoint_path: str, variant: str = "vit-b", strict: bool = False):
@@ -200,7 +413,7 @@ class D4RTEncoder(nn.Module):
             checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-h","pytorch_model.bin")
             return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)
         elif variant == "vit-g":
-            checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-g","vit_g_hybrid_pt_1200e.pth")
+            checkpoint_path = os.path.join(checkpoint_path,"VideoMAE2","mae-g","vit_g_ps14_ak_ft_ckpt_7_clean.pth")
             return self.load_videomae_vit_encoder(checkpoint_path, strict=strict)
             
         raise ValueError(f"Unsupported VideoMAE variant: {variant}")
@@ -264,5 +477,5 @@ class D4RTEncoder(nn.Module):
                     raise ValueError(f"Unknown attention type: {aa_type}")
 
         tokens=tokens.reshape(B, S * P, C)
-        tokens = self.norm(tokens)
+        tokens = self.fc_norm(tokens)
         return tokens
