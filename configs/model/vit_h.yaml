@@ -1,18 +1,18 @@
-model:
-  name: vit_h
-  variant: vit-h
-  img_size: 256
-  patch_size: 16
-  mlp_ratio: 4.0
-  encoder_in_chans: 3
-  encoder_embed_dim: 1280
-  encoder_depth: 32
-  encoder_num_heads: 16
-  decoder_embed_dim: 1280
-  decoder_depth: 8
-  decoder_num_heads: 16
-  encoder_pretrained: false
-  encoder_pretrained_path: /inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint
-  encoder_pretrained_variant: vit-h
-  encoder_pretrained_strict: false
-  encoder_pretrained_verbose: true
+all_frames: 48
+name: vit_h
+variant: vit-h
+img_size: 256
+patch_size: 16
+mlp_ratio: 4.0
+encoder_in_chans: 3
+encoder_embed_dim: 1280
+encoder_depth: 32
+encoder_num_heads: 16
+decoder_embed_dim: 1280
+decoder_depth: 8
+decoder_num_heads: 16
+encoder_pretrained: false
+encoder_pretrained_path: /inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint
+encoder_pretrained_variant: vit-h
+encoder_pretrained_strict: false
+encoder_pretrained_verbose: true

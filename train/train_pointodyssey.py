@@ -67,7 +67,7 @@ def setup_tensorboard(cfg):
         return None
     logdir = Path(cfg.tensorboard.logdir)
     logdir.mkdir(parents=True, exist_ok=True)
-    return SummaryWriter(logdir=str(logdir))
+    return SummaryWriter(log_dir=str(logdir))
 
 
 def evaluate(
@@ -130,7 +130,7 @@ def _resolve_path(path_str: str) -> Path:
     return Path(hydra.utils.get_original_cwd()) / path
 
 
-@hydra.main(config_path="../configs", config_name="train_pointodyssey", version_base="1.3")
+@hydra.main(config_path="/inspire/hdd/project/wuliqifa/public/dyh/d4rt/opend4rt/configs", config_name="train_pointodyssey", version_base="1.3")
 def main(cfg: DictConfig):
     data_root = _resolve_path(cfg.data_root)
     checkpoint_dir = _resolve_path(cfg.checkpoint_dir)

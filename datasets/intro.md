@@ -194,7 +194,7 @@ config = PointOdysseyConfig(
     split="train",
     num_frames=48,              # 每个样本的帧数
     num_queries=2048,           # 每个样本的查询数
-    target_resolution=(512, 288),  # (W, H)
+    target_resolution=(256, 256),  # (W, H)
     query_edge_ratio=0.3,       # 30% 边缘采样，70% 随机采样
     tcam_equals_ttgt_ratio=0.4, # 40% t_cam = t_tgt (按D4RT论文Appendix A)
     temporal_random_stride=True,

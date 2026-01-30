@@ -1,0 +1,3 @@
+- data_root=/inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey
+- wandb.project=opend4rt
+- wandb.name=run_vit_b

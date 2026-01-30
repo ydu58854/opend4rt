@@ -1,0 +1,10 @@
+# Core training dependencies for D4RT
+# NOTE: install torch/torchvision versions that match your CUDA runtime.
+torch
+torchvision
+numpy
+Pillow
+hydra-core
+omegaconf
+wandb
+tensorboard
