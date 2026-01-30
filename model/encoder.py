@@ -141,18 +141,14 @@ class D4RTEncoder(nn.Module):
 
     def load_videomae_vit_encoder(self, checkpoint_path: str, strict: bool = False):
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        state_dict = checkpoint.get("model") or checkpoint.get("state_dict") or checkpoint
+        state_dict = checkpoint.get("module") or checkpoint.get("state_dict") or checkpoint.get("model") or checkpoint
         remapped = {}
         skipped = []
 
 
         for key, value in state_dict.items():
-            if key.startswith("module."):
-                key = key[len("module."):]
             if key.startswith("backbone."):
                 key = key[len("backbone."):]
-            if key.startswith("encoder."):
-                key = key[len("encoder."):]
 
             if key.startswith("blocks."):
                 parts = key.split(".")
@@ -188,19 +184,6 @@ class D4RTEncoder(nn.Module):
                 remapped[key] = value
                 continue
 
-            if key == "pos_embed":
-                remapped[key] = value
-                continue
-
-        if "pos_embed" in remapped:
-            pos_embed = remapped["pos_embed"]
-            if pos_embed.ndim == 3 and pos_embed.shape[1] == self.pos_embed.shape[1] + 1:
-                pos_embed = pos_embed[:, 1:, :]
-            if pos_embed.shape != self.pos_embed.shape:
-                skipped.append("pos_embed")
-                remapped.pop("pos_embed", None)
-            else:
-                remapped["pos_embed"] = pos_embed
 
         load_result = self.load_state_dict(remapped, strict=strict)
         return load_result, skipped
