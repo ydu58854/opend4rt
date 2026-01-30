@@ -30,7 +30,7 @@ dataset:
   val_max_batches: 50
 
 wandb:
-  use: false
+  use: true
   project: opend4rt
   entity: null
   name: null
@@ -40,5 +40,5 @@ wandb:
   log_every: 10
 
 tensorboard:
-  use: false
+  use: true
   logdir: runs/pointodyssey
