@@ -124,6 +124,7 @@ def train_step(
     scheduler: LambdaLR | None = None,
     max_grad_norm: float = 10.0,
     return_grad_norm: bool = False,
+    return_losses: bool = False,
 ) -> Tensor:
     """Run a single training step.
 
@@ -146,6 +147,14 @@ def train_step(
     if scheduler is not None:
         scheduler.step()
 
+    if return_losses:
+        # Return unweighted per-task losses (mean over all queries)
+        loss_stats = {k: v.detach().mean() for k, v in losses.items()}
+        return (
+            loss.detach(),
+            grad_norm.detach() if torch.is_tensor(grad_norm) else torch.tensor(float(grad_norm)),
+            loss_stats,
+        )
     if return_grad_norm:
         return loss.detach(), grad_norm.detach() if torch.is_tensor(grad_norm) else torch.tensor(float(grad_norm))
     return loss.detach()

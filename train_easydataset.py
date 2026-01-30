@@ -146,7 +146,7 @@ def main(cfg: DictConfig):
                 targets[key] = value[:bs]
             sample["targets"] = targets
         batch = move_to_device(sample, device)
-        loss, grad_norm = train_step(
+        loss, grad_norm, loss_stats = train_step(
             model,
             batch,
             loss_fn,
@@ -155,8 +155,22 @@ def main(cfg: DictConfig):
             scheduler,
             max_grad_norm=cfg.max_grad_norm,
             return_grad_norm=True,
+            return_losses=True,
         )
-        print(f"step {step:04d} loss {loss.item():.6f}")
+        print(
+            "step {step:04d} loss {loss:.6f} "
+            "L3D {L3D:.4f} L2D {L2D:.4f} Lvis {Lvis:.4f} "
+            "Ldisp {Ldisp:.4f} Lconf {Lconf:.4f} Lnormal {Lnormal:.4f}".format(
+                step=step,
+                loss=loss.item(),
+                L3D=loss_stats["L3D"].item(),
+                L2D=loss_stats["L2D"].item(),
+                Lvis=loss_stats["Lvis"].item(),
+                Ldisp=loss_stats["Ldisp"].item(),
+                Lconf=loss_stats["Lconf"].item(),
+                Lnormal=loss_stats["Lnormal"].item(),
+            )
+        )
         gpu_mem = None
         gpu_mem_max = None
         if device.type == "cuda":
@@ -165,6 +179,12 @@ def main(cfg: DictConfig):
         if wandb is not None and step % cfg.wandb.log_every == 0:
             log_payload = {
                 "loss": loss.item(),
+                "loss/L3D": loss_stats["L3D"].item(),
+                "loss/L2D": loss_stats["L2D"].item(),
+                "loss/Lvis": loss_stats["Lvis"].item(),
+                "loss/Ldisp": loss_stats["Ldisp"].item(),
+                "loss/Lconf": loss_stats["Lconf"].item(),
+                "loss/Lnormal": loss_stats["Lnormal"].item(),
                 "lr": optimizer.param_groups[0]["lr"],
                 "best_loss": best_loss,
                 "grad_norm": float(grad_norm.item()),
@@ -175,6 +195,12 @@ def main(cfg: DictConfig):
             wandb.log(log_payload, step=step)
         if writer is not None and step % cfg.wandb.log_every == 0:
             writer.add_scalar("loss", loss.item(), step)
+            writer.add_scalar("loss/L3D", loss_stats["L3D"].item(), step)
+            writer.add_scalar("loss/L2D", loss_stats["L2D"].item(), step)
+            writer.add_scalar("loss/Lvis", loss_stats["Lvis"].item(), step)
+            writer.add_scalar("loss/Ldisp", loss_stats["Ldisp"].item(), step)
+            writer.add_scalar("loss/Lconf", loss_stats["Lconf"].item(), step)
+            writer.add_scalar("loss/Lnormal", loss_stats["Lnormal"].item(), step)
             writer.add_scalar("lr", optimizer.param_groups[0]["lr"], step)
             writer.add_scalar("best_loss", best_loss, step)
             writer.add_scalar("grad_norm", float(grad_norm.item()), step)
