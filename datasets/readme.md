@@ -232,3 +232,55 @@ info_Value: [849   3   3]
 info_Key: extrinsics
 info_Value: [849   4   4]
 ------------------------------
+
+
+
+有部分数据集没有3D traj
+(d4rt) [root:opend4rt]$ python /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/sample/test.py /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey
+[scan] root=/inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey
+[scan] found npz files: 146
+
+========== SUMMARY ==========
+Total npz files scanned: 146
+Load fail: 0
+Missing trajs_3d key: 0
+Bad trajs_3d (among files with key): 22
+Bad ratio (bad / readable_with_key): 22/146 = 0.150685
+OK count (rough): 124
+
+========== REASONS (top) ==========
+ok                       : 124
+scalar_nan_or_inf        : 22
+
+========== BAD EXAMPLES (first) ==========
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character6_f/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character6/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character2/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/gso_in_big/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character2_/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character3/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character3_f/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/gso_out_big/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character0_f/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character4_f/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character5_/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character0_/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character5_f/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character4_/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character5/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character1_f/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character0_f2/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character1/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character4/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character2_f/anno.npz
+[scalar_nan_or_inf] /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/train/character0/anno.npz
+
+------------------------------
+anno_Key: trajs_3d
+anno_shape: ()
+anno_Value: nan
+------------------------------
+info_Key: trajs_3d
+info_Value: []
+------------------------------

@@ -229,6 +229,17 @@ class Base4DTrajectoryDataset(Dataset, ABC):
 
         # Get image dimensions (after possible augmentation)
         C, T, H, W = images.shape
+        t3d = traj_data["trajs_3d"]
+        print("trajs_3d type:", type(t3d))
+        if isinstance(t3d, torch.Tensor):
+            print("trajs_3d torch shape:", tuple(t3d.shape), t3d.dtype)
+        else:
+            import numpy as np
+            print("trajs_3d np shape:", getattr(t3d, "shape", None), getattr(t3d, "dtype", None))
+        trajs_3d = traj_data["trajs_3d"]
+        if isinstance(trajs_3d, np.ndarray) and trajs_3d.shape == ():
+            print("BAD trajs_3d scalar value:", trajs_3d.item())
+
 
         # Sample queries and compute targets
         queries, targets = self.sampler.sample(
