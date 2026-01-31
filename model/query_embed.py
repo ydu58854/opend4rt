@@ -126,13 +126,16 @@ class QueryEmbedding(nn.Module):
         u = uv[..., 0:1]  # (B,N,1)
         v = uv[..., 1:2]
 
-        freq_bands = cast(torch.Tensor, self.freq_bands)
+        # Get the device of uv tensor to ensure freq_bands is on the same device
+        device = uv.device
+        freq_bands = self.freq_bands.to(device)  # Ensure freq_bands is on the same device as uv
+
         u_proj = (2.0 * math.pi) * u * freq_bands[None, None, :]  # (B,N,F)
         v_proj = (2.0 * math.pi) * v * freq_bands[None, None, :]
 
         feat = torch.cat(
             [torch.sin(u_proj), torch.cos(u_proj),
-             torch.sin(v_proj), torch.cos(v_proj)],
+            torch.sin(v_proj), torch.cos(v_proj)],
             dim=-1,  # (B,N,4F)
         )
         if self.include_uv:
@@ -215,6 +218,11 @@ class QueryEmbedding(nn.Module):
         if "img_patch_size" not in meta:
             raise KeyError("meta must contain 'img_patch_size'")
 
+        # Ensure query and images are on the same device
+        device = query.device  # Get the device from query tensor
+        if images is not None:
+            images = images.to(device)  # Move images to the same device as query
+
         v = meta["img_patch_size"]
         ac = meta.get("align_corners", True)
         if torch.is_tensor(v):
@@ -225,10 +233,10 @@ class QueryEmbedding(nn.Module):
             ac = bool(ac.item())
         else:
             ac = bool(ac)
-            
+
         if img_patch_size != 0:
             assert images is not None
-            # want (B,T,C,H,W)
+            # Ensure images is on the same device as query
             if images.shape[1] == self.image_in_chans:      # (B,C,T,H,W)
                 images = images.transpose(1,2)
             elif images.shape[2] == self.image_in_chans:    # already (B,T,C,H,W)
@@ -239,13 +247,10 @@ class QueryEmbedding(nn.Module):
             if T != self.num_frames:
                 raise ValueError(f"T={T} != num_frames={self.num_frames}")
 
-
-
-
-        if img_patch_size!=0 and img_patch_size not in self.img_patch_sizes :
+        if img_patch_size != 0 and img_patch_size not in self.img_patch_sizes:
             raise ValueError(f"Unsupported img_patch_size={img_patch_size}. Supported: {self.img_patch_sizes}")
 
-        #images: (B, T, C, H, W) 
+        # Ensure all tensors are on the same device
         if query.dim() != 3 or query.size(-1) != 5:
             raise ValueError(f"Expected query shape [B, N, 5], got {tuple(query.shape)}")
 
@@ -255,13 +260,12 @@ class QueryEmbedding(nn.Module):
         uv = uv.clamp(0.0, 1.0)
 
         # 时间索引：转 long 并 clamp
-
         t_src = query[..., 2].round().long().clamp(0, self.num_frames - 1)  # (B,N)
         t_tgt = query[..., 3].round().long().clamp(0, self.num_frames - 1)
         t_cam = query[..., 4].round().long().clamp(0, self.num_frames - 1)
 
         # token1
-        uv_f = uv.to(torch.float32)           #float32对于fourier计算更加友好
+        uv_f = uv.to(torch.float32)           # float32 对于 Fourier 计算更加友好
         uv_feat = self._fourier_uv(uv_f)        # (B,N,4F[+2])
         token1 = self.uv_proj(uv_feat).to(tok_dtype)        # (B,N,D)
 
@@ -289,7 +293,6 @@ class QueryEmbedding(nn.Module):
             k = img_patch_size
             patch_flat = patches.reshape(B, N, self.image_in_chans * (k * k)).to(dtype=token1.dtype)
 
-
             token5 = self.patch_mlps[str(img_patch_size)](patch_flat)
 
             out = token1 + token2 + token3 + token4 + token5
@@ -297,7 +300,7 @@ class QueryEmbedding(nn.Module):
             out = token1 + token2 + token3 + token4
 
         out = self.out_drop(out)
-        
         out = self.out_mlp(out)
-        
+
         return out
+

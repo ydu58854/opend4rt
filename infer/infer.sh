@@ -11,11 +11,12 @@ set -euo pipefail
 #   --output-resolution target
 
 # Depth prediction at original resolution
-python opend4rt/infer/infer_pointodyssey.py \
+python infer/infer_pointodyssey.py \
   --scene-dir /inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey/test/ani2 \
   --checkpoint /inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint/best.pt \
   --mode depth \
-  --output-resolution orig
+  --output-resolution orig \
+  --run-name ani2_48_depth 
 
 # Point track from a single point (u,v) in frame t_src
 # python opend4rt/infer/infer_pointodyssey.py \

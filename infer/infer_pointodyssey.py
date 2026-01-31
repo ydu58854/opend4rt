@@ -50,8 +50,6 @@ def save_json(path: Path, payload) -> None:
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, sort_keys=True)
 
-
-
 def build_meta(images, orig_size, img_patch_size=9, align_corners=True):
     return {
         "aspect_ratio": torch.tensor([[float(orig_size[0]) / float(orig_size[1])]], dtype=torch.float32),
@@ -104,7 +102,7 @@ def predict_track(model, meta, images, global_features, u, v, t_src, batch_size=
 
 
 def predict_depth_maps(model, meta, images, global_features, batch_size=4096, output_hw=None):
-    _, T, H_img, W_img = images.shape
+    _,_, T, H_img, W_img = images.shape
     if output_hw is None:
         H, W = H_img, W_img
     else:
