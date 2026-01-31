@@ -97,7 +97,7 @@ def decode_queries(model, meta, images, global_features, queries, batch_size=409
 
 
 def predict_track(model, meta, images, global_features, u, v, t_src, batch_size=4096):
-    _, T, H, W = images.shape
+    _, _, T, H, W = images.shape  # images: (B, C, T, H, W)
     t = torch.arange(T, dtype=torch.float32).view(-1, 1)
     uv = torch.tensor([[u, v]], dtype=torch.float32).repeat(T, 1)
     t_src_vec = torch.full((T, 1), float(t_src))
@@ -128,7 +128,7 @@ def predict_depth_maps(model, meta, images, global_features, batch_size=4096, ou
 
 
 def predict_pointcloud(model, meta, images, global_features, t_cam_ref=0, batch_size=4096, output_hw=None):
-    _, T, H_img, W_img = images.shape
+    _, _, T, H_img, W_img = images.shape  # images: (B, C, T, H, W)
     if output_hw is None:
         H, W = H_img, W_img
     else:
@@ -163,7 +163,7 @@ def umeyama_alignment(src, tgt):
 
 
 def estimate_extrinsics(model, meta, images, global_features, i, j, grid_hw=(32, 32), batch_size=4096):
-    _, T, H, W = images.shape
+    _, _, T, H, W = images.shape  # images: (B, C, T, H, W)
     gh, gw = grid_hw
     xs = torch.linspace(0, W - 1, gw)
     ys = torch.linspace(0, H - 1, gh)
@@ -186,7 +186,7 @@ def estimate_extrinsics(model, meta, images, global_features, i, j, grid_hw=(32,
 
 
 def estimate_intrinsics(model, meta, images, global_features, i, grid_hw=(32, 32), batch_size=4096):
-    _, T, H, W = images.shape
+    _, _, T, H, W = images.shape  # images: (B, C, T, H, W)
     gh, gw = grid_hw
     xs = torch.linspace(0, W - 1, gw)
     ys = torch.linspace(0, H - 1, gh)
@@ -221,7 +221,7 @@ def predict_dense_tracks(
     query_batch_size=4096,
     output_hw=None,
 ):
-    _, T, H_img, W_img = images.shape
+    _, _, T, H_img, W_img = images.shape  # images: (B, C, T, H, W)
     if output_hw is None:
         H, W = H_img, W_img
     else:
