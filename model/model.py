@@ -11,7 +11,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from timm.models.layers import trunc_normal_ as __call_trunc_normal_
+from timm.layers import trunc_normal_ as __call_trunc_normal_
 from .modules import (
     Block,
     PatchEmbed,

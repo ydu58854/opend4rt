@@ -12,8 +12,8 @@ encoder_num_heads: 16
 decoder_embed_dim: 1408
 decoder_depth: 8
 decoder_num_heads: 16
-encoder_pretrained: false
+encoder_pretrained: true
 encoder_pretrained_path: /inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint
 encoder_pretrained_variant: vit-g
-encoder_pretrained_strict: false
+encoder_pretrained_strict: true
 encoder_pretrained_verbose: true

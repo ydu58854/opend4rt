@@ -9,8 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from datasets.utils import load_image_tensor
 from model import D4RT  # type: ignore
 
-
-def load_frames(scene_dir: Path, target_resolution, normalize: bool = True):
+def load_frames(scene_dir: Path, target_resolution, normalize: bool = True, max_frames=48):
     rgb_dir = scene_dir / "rgbs"
     if not rgb_dir.exists():
         raise FileNotFoundError(f"rgbs not found: {rgb_dir}")
@@ -19,7 +18,7 @@ def load_frames(scene_dir: Path, target_resolution, normalize: bool = True):
         raise FileNotFoundError(f"No rgb_*.jpg found in {rgb_dir}")
 
     frames = []
-    for fp in files:
+    for fp in files[:max_frames]:  # 只取前 max_frames 帧
         img = load_image_tensor(fp, target_size=target_resolution, normalize=normalize)
         frames.append(img)
     stacked = torch.stack(frames, dim=0)  # (T,C,H,W)
@@ -31,6 +30,7 @@ def load_frames(scene_dir: Path, target_resolution, normalize: bool = True):
         orig_W, orig_H = im.size
 
     return images, (orig_W, orig_H)
+
 
 
 def build_meta(images, orig_size, img_patch_size=9, align_corners=True):

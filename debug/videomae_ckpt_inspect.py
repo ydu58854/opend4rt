@@ -53,7 +53,7 @@ def main():
     text = json.dumps(summary, indent=2)
 
     # 输出文件：默认在 checkpoint 同目录下 vitb.txt
-    out_path = Path(args.out) if args.out is not None else (ckpt_path.parent / "vit_g_hybrid_pt_1200e_k710_ft.txt")
+    out_path = Path(args.out) if args.out is not None else (ckpt_path.parent / "best.txt")
     out_path.write_text(text + "\n", encoding="utf-8")
 
     # 终端也打印一份
