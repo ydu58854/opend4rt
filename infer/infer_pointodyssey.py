@@ -380,7 +380,7 @@ def main():
     parser = argparse.ArgumentParser(description="Inference for PointOdyssey")
     parser.add_argument("--scene-dir", type=str, required=True)
     parser.add_argument("--checkpoint", type=str, required=True)
-    parser.add_argument("--run-name", type=str, required=True)
+    parser.add_argument("--run-name", type=str, default="")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--target-resolution", type=int, nargs=2, default=(256, 256))
     parser.add_argument("--img-patch-size", type=int, default=9)
@@ -402,8 +402,41 @@ def main():
     parser.add_argument("--output-resolution", type=str, default="target", choices=["target", "orig"])
     args = parser.parse_args()
 
-    base_output_dir = Path(__file__).resolve().parent
-    output_dir = ensure_run_dir(base_output_dir, args.run_name)
+    # Create output directory with inference type and timestamp
+    # Base directory: d4rt/infer/
+    base_infer_dir = Path(__file__).resolve().parents[2] / "infer"
+
+    # Generate timestamped folder name with inference type
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if args.run_name:
+        folder_name = f"{args.mode}_{args.run_name}_{run_timestamp}"
+    else:
+        folder_name = f"{args.mode}_{run_timestamp}"
+
+    output_dir = base_infer_dir / folder_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"[Inference] Output directory: {output_dir}")
+
+    # Create info.txt with checkpoint path and inference metadata
+    checkpoint_path = Path(args.checkpoint).resolve()
+    info_content = f"""Inference Information
+{'=' * 60}
+Inference Type: {args.mode}
+Checkpoint Path: {checkpoint_path}
+Scene Directory: {Path(args.scene_dir).resolve()}
+Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Device: {args.device}
+Target Resolution: {args.target_resolution}
+Output Resolution: {args.output_resolution}
+Image Patch Size: {args.img_patch_size}
+Batch Size: {args.batch_size}
+{'=' * 60}
+"""
+    info_path = output_dir / "info.txt"
+    with open(info_path, "w", encoding="utf-8") as f:
+        f.write(info_content)
+    print(f"[Inference] Info saved to {info_path}")
 
     device = torch.device(args.device)
     model = D4RT(img_size=256, patch_size=16, all_frames=48, encoder_depth=12, encoder_pretrained=False)
@@ -424,9 +457,9 @@ def main():
         output_hw = (args.target_resolution[1], args.target_resolution[0])
 
     run_info = {
-        "run_name": args.run_name,
+        "run_name": folder_name,
         "scene_dir": str(Path(args.scene_dir).resolve()),
-        "checkpoint": str(Path(args.checkpoint).resolve()),
+        "checkpoint": str(checkpoint_path),
         "mode": args.mode,
         "device": args.device,
         "target_resolution": list(args.target_resolution),
