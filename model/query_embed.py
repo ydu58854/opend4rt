@@ -126,9 +126,9 @@ class QueryEmbedding(nn.Module):
         u = uv[..., 0:1]  # (B,N,1)
         v = uv[..., 1:2]
 
-        # Get the device of uv tensor to ensure freq_bands is on the same device
-        device = uv.device
-        freq_bands = self.freq_bands.to(device)  # Ensure freq_bands is on the same device as uv
+        # Ensure freq_bands are on the same device as uv
+        device = uv.device  # Get the device of uv
+        freq_bands = self.freq_bands.to(device)  # Move freq_bands to the same device
 
         u_proj = (2.0 * math.pi) * u * freq_bands[None, None, :]  # (B,N,F)
         v_proj = (2.0 * math.pi) * v * freq_bands[None, None, :]
@@ -141,6 +141,7 @@ class QueryEmbedding(nn.Module):
         if self.include_uv:
             feat = torch.cat([uv, feat], dim=-1)  # (B,N,2+4F)
         return feat
+
 
     @staticmethod
     def _extract_kxk_patches_grid_sample(
@@ -203,7 +204,6 @@ class QueryEmbedding(nn.Module):
         )
         patches = patches_bn.reshape(B, N, C, k, k)
         return patches
-
 
     def forward(self, meta, query: torch.Tensor, images: torch.Tensor | None = None) -> torch.Tensor:
         """
