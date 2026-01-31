@@ -1,0 +1,4 @@
+- data_root=/inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey
+- split=train
+- num_workers=4
+- tensorboard.logdir=runs/pointodyssey_4workers
