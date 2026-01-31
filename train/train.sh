@@ -8,7 +8,8 @@ set -euo pipefail
 # python train/train_pointodyssey.py data_root=/inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey 
 
 # python /inspire/hdd/global_user/chenxinyan-240108120066/youjunqi/occupy_gpu.py
-
+source /inspire/hdd/global_user/chenxinyan-240108120066/youjunqi/condainit2
+conda activate d4rt
 
 
 #!/usr/bin/env bash

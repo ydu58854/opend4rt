@@ -1,5 +1,5 @@
 {
-  "batch_size": 4096,
+  "batch_size": 128,
   "checkpoint": "/inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint/best.pt",
   "device": "cuda",
   "img_patch_size": 9,
@@ -15,5 +15,5 @@
     256,
     256
   ],
-  "timestamp": "2026-01-31T16:58:35"
+  "timestamp": "2026-01-31T17:16:57"
 }

@@ -16,7 +16,8 @@ python infer/infer_pointodyssey.py \
   --checkpoint /inspire/hdd/project/wuliqifa/public/dyh/d4rt/checkpoint/best.pt \
   --mode depth \
   --output-resolution orig \
-  --run-name ani2_48_depth 
+  --run-name ani2_48_depth \
+  --batch-size 128
 
 # Point track from a single point (u,v) in frame t_src
 # python opend4rt/infer/infer_pointodyssey.py \
