@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from datasets.utils import load_image_tensor
@@ -141,9 +142,39 @@ def predict_pointcloud(model, meta, images, global_features, t_cam_ref=0, batch_
         t_cam = torch.full((uv.shape[0], 1), float(t_cam_ref))
         q = torch.cat([uv, t_src, t_tgt, t_cam], dim=-1).unsqueeze(0)
         preds = decode_queries(model, meta, images, global_features, q, batch_size=batch_size)
-        xyz = preds[0, :, 0:3].reshape(H, W, 3)
+        xyz = preds[0, :, 0:3].reshape(H, W, 3).cpu()
         pointclouds.append(xyz)
+        del preds
+        torch.cuda.empty_cache()
     return torch.stack(pointclouds, dim=0)
+
+
+def predict_normal_maps(model, meta, images, global_features, batch_size=4096, output_hw=None):
+    """预测法向量图
+
+    模型输出 13 维: [xyz(3), uv(2), vis(1), disp(3), normal(3), conf(1)]
+    normal 在索引 [9:12]
+    """
+    _,_, T, H_img, W_img = images.shape
+    if output_hw is None:
+        H, W = H_img, W_img
+    else:
+        H, W = output_hw
+    uv = build_uv_grid(H, W)  # (HW,2)
+    normal_maps = []
+    for t in range(T):
+        t_src = torch.full((uv.shape[0], 1), float(t))
+        t_tgt = torch.full((uv.shape[0], 1), float(t))
+        t_cam = torch.full((uv.shape[0], 1), float(t))
+        q = torch.cat([uv, t_src, t_tgt, t_cam], dim=-1).unsqueeze(0)
+        preds = decode_queries(model, meta, images, global_features, q, batch_size=batch_size)
+        # normal 在索引 [9:12]，需要归一化
+        normal = preds[0, :, 9:12].reshape(H, W, 3).cpu()
+        normal = torch.nn.functional.normalize(normal, dim=-1)
+        normal_maps.append(normal)
+        del preds
+        torch.cuda.empty_cache()
+    return torch.stack(normal_maps, dim=0)
 
 
 def umeyama_alignment(src, tgt):
@@ -275,6 +306,76 @@ def predict_dense_tracks(
     return tracks
 
 
+def save_depth_as_16bit_png(depth_maps: np.ndarray, output_dir: Path, scale: float = 1000.0):
+    """将预测的深度图保存为 16-bit PNG 格式
+
+    Args:
+        depth_maps: (T, H, W) 深度数组，单位为米
+        output_dir: 输出目录
+        scale: 深度缩放因子，与加载时相同 (默认 1000.0)
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for t, depth in enumerate(depth_maps):
+        # 逆向转换: 米 → 16-bit 整数
+        # 原始加载: depth_16bit / 65535.0 * scale = depth_meters
+        # 逆向保存: depth_meters / scale * 65535.0 = depth_16bit
+        depth_16bit = (depth / scale * 65535.0).clip(0, 65535).astype(np.uint16)
+
+        img = Image.fromarray(depth_16bit, mode='I;16')
+        img.save(output_dir / f"depth_{t:05d}.png")
+
+    print(f"Saved {len(depth_maps)} depth maps as 16-bit PNG to {output_dir}")
+
+
+def save_normals_as_jpg(normals: np.ndarray, output_dir: Path):
+    """将预测的法向量图保存为 JPG 格式
+
+    Args:
+        normals: (T, H, W, 3) 法向量数组，值域 [-1, 1]
+        output_dir: 输出目录
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for t, normal in enumerate(normals):
+        # 逆向转换: [-1, 1] → [0, 255]
+        # 原始加载: normal_img * 2.0 - 1.0 = normal ([-1, 1])
+        # 逆向保存: (normal + 1.0) * 127.5 = normal_img ([0, 255])
+        normal_uint8 = ((normal + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+
+        img = Image.fromarray(normal_uint8, mode='RGB')
+        img.save(output_dir / f"normal_{t:05d}.jpg")
+
+    print(f"Saved {len(normals)} normal maps as JPG to {output_dir}")
+
+
+def save_dense_tracks_as_npz(trajs_2d: np.ndarray, visibs: np.ndarray, output_dir: Path, orig_size: tuple):
+    """将预测的密集轨迹保存为 npz 格式（与 anno.npz 格式一致）
+
+    Args:
+        trajs_2d: (N, T, 2) 归一化 uv 坐标，值域 [0, 1]
+        visibs: (N, T) 可见性
+        output_dir: 输出目录
+        orig_size: (W, H) 原始图像尺寸
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    W, H = orig_size
+    # 转换为像素坐标: uv [0,1] → pixel [0, W-1], [0, H-1]
+    # trajs_2d: (N, T, 2) where [..., 0] is u, [..., 1] is v
+    trajs_2d_pixel = trajs_2d.copy()
+    trajs_2d_pixel[..., 0] = trajs_2d[..., 0] * (W - 1)  # u -> x
+    trajs_2d_pixel[..., 1] = trajs_2d[..., 1] * (H - 1)  # v -> y
+
+    # 转置为 (T, N, 2) 以匹配 anno.npz 格式
+    trajs_2d_pixel = trajs_2d_pixel.transpose(1, 0, 2)  # (T, N, 2)
+    visibs = visibs.T  # (T, N)
+
+    out_path = output_dir / "pred_tracks.npz"
+    np.savez(out_path, trajs_2d=trajs_2d_pixel.astype(np.float32), visibs=visibs.astype(bool))
+    print(f"Saved dense tracks to {out_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Inference for PointOdyssey")
     parser.add_argument("--scene-dir", type=str, required=True)
@@ -288,7 +389,7 @@ def main():
         "--mode",
         type=str,
         default="depth",
-        choices=["depth", "track", "pointcloud", "intrinsics", "extrinsics", "dense_tracks"],
+        choices=["depth", "normal", "track", "pointcloud", "intrinsics", "extrinsics", "dense_tracks"],
     )
     parser.add_argument("--t-src", type=int, default=0)
     parser.add_argument("--u", type=float, default=0.5)
@@ -344,14 +445,25 @@ def main():
         print(f"track preds {preds.shape} -> {out_path}")
     elif args.mode == "depth":
         depth = predict_depth_maps(model, meta, images, global_features, args.batch_size, output_hw=output_hw)
+        depth_np = depth.detach().cpu().numpy()
         out_path = output_dir / "depth.npy"
-        np.save(out_path, depth.detach().cpu().numpy())
+        np.save(out_path, depth_np)
         print(f"depth maps {depth.shape} -> {out_path}")
+        # 同时保存为 16-bit PNG 格式
+        save_depth_as_16bit_png(depth_np, output_dir / "depths")
     elif args.mode == "pointcloud":
         pc = predict_pointcloud(model, meta, images, global_features, args.t_cam_ref, args.batch_size, output_hw=output_hw)
         out_path = output_dir / "pointcloud.npy"
         np.save(out_path, pc.detach().cpu().numpy())
         print(f"pointcloud {pc.shape} -> {out_path}")
+    elif args.mode == "normal":
+        normals = predict_normal_maps(model, meta, images, global_features, args.batch_size, output_hw=output_hw)
+        normals_np = normals.detach().cpu().numpy()
+        out_path = output_dir / "normals.npy"
+        np.save(out_path, normals_np)
+        print(f"normal maps {normals.shape} -> {out_path}")
+        # 同时保存为 JPG 格式
+        save_normals_as_jpg(normals_np, output_dir / "normals")
     elif args.mode == "intrinsics":
         fx, fy = estimate_intrinsics(model, meta, images, global_features, args.i)
         out_path = output_dir / "intrinsics.json"
@@ -374,8 +486,8 @@ def main():
             output_hw=output_hw,
         )
         if tracks:
-            uv = np.stack([t["uv"] for t in tracks], axis=0)
-            vis = np.stack([t["vis"] for t in tracks], axis=0)
+            uv = np.stack([t["uv"] for t in tracks], axis=0)  # (N, T, 2)
+            vis = np.stack([t["vis"] for t in tracks], axis=0)  # (N, T)
         else:
             t_len = images.shape[2] if images.ndim == 5 else images.shape[1]
             uv = np.empty((0, t_len, 2), dtype=np.float32)
@@ -383,6 +495,8 @@ def main():
         out_path = output_dir / "dense_tracks.npz"
         np.savez(out_path, uv=uv, vis=vis)
         print(f"tracks: {len(tracks)} -> {out_path}")
+        # 同时保存为与 anno.npz 格式一致的 npz
+        save_dense_tracks_as_npz(uv, vis, output_dir, orig_size)
 
 
 if __name__ == "__main__":
