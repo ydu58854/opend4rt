@@ -82,6 +82,7 @@ def encode_once(model, meta, images):
 
 
 def decode_queries(model, meta, images, global_features, queries, batch_size=4096):
+    queries = queries.to(images.device)  # 确保 queries 和 images 在同一设备上
     outputs = []
     for i in range(0, queries.shape[1], batch_size):
         q = queries[:, i : i + batch_size]
