@@ -1,5 +1,7 @@
 import argparse
+import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +32,23 @@ def load_frames(scene_dir: Path, target_resolution, normalize: bool = True, max_
         orig_W, orig_H = im.size
 
     return images, (orig_W, orig_H)
+
+
+
+def ensure_run_dir(base_dir: Path, run_name: str) -> Path:
+    run_name = run_name.strip()
+    if not run_name:
+        raise ValueError("run name is required and cannot be empty")
+    if Path(run_name).name != run_name:
+        raise ValueError("run name must be a simple name without path separators")
+    out_dir = base_dir / run_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def save_json(path: Path, payload) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
 
 
 
@@ -255,6 +274,7 @@ def main():
     parser = argparse.ArgumentParser(description="Inference for PointOdyssey")
     parser.add_argument("--scene-dir", type=str, required=True)
     parser.add_argument("--checkpoint", type=str, required=True)
+    parser.add_argument("--run-name", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--target-resolution", type=int, nargs=2, default=(256, 256))
     parser.add_argument("--img-patch-size", type=int, default=9)
@@ -276,6 +296,9 @@ def main():
     parser.add_argument("--output-resolution", type=str, default="target", choices=["target", "orig"])
     args = parser.parse_args()
 
+    base_output_dir = Path(__file__).resolve().parent
+    output_dir = ensure_run_dir(base_output_dir, args.run_name)
+
     device = torch.device(args.device)
     model = D4RT(img_size=256, patch_size=16, all_frames=48, encoder_depth=12)
     ckpt = torch.load(args.checkpoint, map_location="cpu")
@@ -294,22 +317,46 @@ def main():
     else:
         output_hw = (args.target_resolution[1], args.target_resolution[0])
 
+    run_info = {
+        "run_name": args.run_name,
+        "scene_dir": str(Path(args.scene_dir).resolve()),
+        "checkpoint": str(Path(args.checkpoint).resolve()),
+        "mode": args.mode,
+        "device": args.device,
+        "target_resolution": list(args.target_resolution),
+        "output_resolution": args.output_resolution,
+        "output_hw": list(output_hw),
+        "img_patch_size": args.img_patch_size,
+        "batch_size": args.batch_size,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+    }
+    save_json(output_dir / "run.json", run_info)
+
     if args.mode == "track":
         preds = predict_track(model, meta, images, global_features, args.u, args.v, args.t_src, args.batch_size)
-        print("track preds", preds.shape)
+        out_path = output_dir / "track.npy"
+        np.save(out_path, preds.detach().cpu().numpy())
+        print(f"track preds {preds.shape} -> {out_path}")
     elif args.mode == "depth":
         depth = predict_depth_maps(model, meta, images, global_features, args.batch_size, output_hw=output_hw)
-        print("depth maps", depth.shape)
+        out_path = output_dir / "depth.npy"
+        np.save(out_path, depth.detach().cpu().numpy())
+        print(f"depth maps {depth.shape} -> {out_path}")
     elif args.mode == "pointcloud":
         pc = predict_pointcloud(model, meta, images, global_features, args.t_cam_ref, args.batch_size, output_hw=output_hw)
-        print("pointcloud", pc.shape)
+        out_path = output_dir / "pointcloud.npy"
+        np.save(out_path, pc.detach().cpu().numpy())
+        print(f"pointcloud {pc.shape} -> {out_path}")
     elif args.mode == "intrinsics":
         fx, fy = estimate_intrinsics(model, meta, images, global_features, args.i)
-        print(f"fx={fx:.4f} fy={fy:.4f}")
+        out_path = output_dir / "intrinsics.json"
+        save_json(out_path, {"fx": fx, "fy": fy})
+        print(f"fx={fx:.4f} fy={fy:.4f} -> {out_path}")
     elif args.mode == "extrinsics":
         R, t = estimate_extrinsics(model, meta, images, global_features, args.i, args.j)
-        print("R", R)
-        print("t", t)
+        out_path = output_dir / "extrinsics.npz"
+        np.savez(out_path, R=R, t=t)
+        print(f"R {R.shape} t {t.shape} -> {out_path}")
     elif args.mode == "dense_tracks":
         tracks = predict_dense_tracks(
             model,
@@ -321,7 +368,16 @@ def main():
             query_batch_size=args.batch_size,
             output_hw=output_hw,
         )
-        print(f"tracks: {len(tracks)}")
+        if tracks:
+            uv = np.stack([t["uv"] for t in tracks], axis=0)
+            vis = np.stack([t["vis"] for t in tracks], axis=0)
+        else:
+            t_len = images.shape[2] if images.ndim == 5 else images.shape[1]
+            uv = np.empty((0, t_len, 2), dtype=np.float32)
+            vis = np.empty((0, t_len), dtype=np.float32)
+        out_path = output_dir / "dense_tracks.npz"
+        np.savez(out_path, uv=uv, vis=vis)
+        print(f"tracks: {len(tracks)} -> {out_path}")
 
 
 if __name__ == "__main__":
