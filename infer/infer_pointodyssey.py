@@ -299,7 +299,7 @@ def main():
     output_dir = ensure_run_dir(base_output_dir, args.run_name)
 
     device = torch.device(args.device)
-    model = D4RT(img_size=256, patch_size=16, all_frames=48, encoder_depth=12)
+    model = D4RT(img_size=256, patch_size=16, all_frames=48, encoder_depth=12, encoder_pretrained=False)
     ckpt = torch.load(args.checkpoint, map_location="cpu")
     state = ckpt.get("model", ckpt)
     model.load_state_dict(state, strict=False)
