@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -237,10 +238,19 @@ def main(cfg: DictConfig):
     # ---- DDP init ----
     rank, world_size, local_rank, is_ddp = ddp_setup()
 
+    # Generate timestamp and create checkpoint/tensorboard subfolder name
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    encoder_variant = cfg.model.encoder_pretrained_variant if hasattr(cfg.model, 'encoder_pretrained_variant') and cfg.model.encoder_pretrained_variant else "vit-unknown"
+    run_subfolder = f"{encoder_variant}_{run_timestamp}"
+
     # paths
     data_root = _resolve_path(cfg.data_root)
-    checkpoint_dir = _resolve_path(cfg.checkpoint_dir)
-    tensorboard_logdir = _resolve_path(cfg.tensorboard.logdir)
+    base_checkpoint_dir = _resolve_path(cfg.checkpoint_dir)
+    checkpoint_dir = base_checkpoint_dir / run_subfolder
+
+    # Create tensorboard logdir under d4rt/runs/ with the same subfolder structure
+    base_runs_dir = Path(hydra.utils.get_original_cwd()) / "runs"
+    tensorboard_logdir = base_runs_dir / run_subfolder
     cfg.tensorboard.logdir = str(tensorboard_logdir)
 
     # device (each rank -> its GPU)
@@ -249,6 +259,8 @@ def main(cfg: DictConfig):
     if is_main_process(rank):
         print(f"[DDP] enabled={is_ddp} rank={rank}/{world_size} local_rank={local_rank} device={device}")
         print(f"[cfg] data_root={data_root}")
+        print(f"[cfg] checkpoint_dir={checkpoint_dir}")
+        print(f"[cfg] tensorboard_logdir={tensorboard_logdir}")
         print(f"[cfg] steps={cfg.steps} batch_size(per_gpu)={cfg.batch_size} num_workers={cfg.num_workers}")
 
     # ---- model ----
