@@ -14,10 +14,10 @@ conda activate d4rt
 
 #!/usr/bin/env bash
 set -euo pipefail
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-torchrun --standalone --nproc_per_node=8 train/train_pointodyssey.py data_root=/inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey split=train "$@"
+export CUDA_VISIBLE_DEVICES=0,1,2,3 TORCH_DISTRIBUTED_DEBUG=DETAIL NCCL_DEBUG=INFO TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+torchrun --standalone --nproc_per_node=4 train/train_pointodyssey.py data_root=/inspire/qb-ilm/project/wuliqifa/public/dyh_data/pointodyssey split=train "$@"
+tensorboard.logdir=runs/pointodyssey
 
-python /inspire/hdd/global_user/chenxinyan-240108120066/youjunqi/occupy_gpu.py
 # PointOdyssey with specific ViT
 # python opend4rt/train/train_pointodyssey.py data_root=/path/to/pointodyssey model=vit_l
 # python opend4rt/train/train_pointodyssey.py data_root=/path/to/pointodyssey model=vit_h

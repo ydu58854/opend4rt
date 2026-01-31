@@ -399,7 +399,7 @@ def main(cfg: DictConfig):
                 )
 
                 # ---- print (rank0 only) ----
-                if is_main_process(rank) and step % 10 == 0:
+                if is_main_process(rank) and step % 1 == 0:
                     print(
                         "step {step:06d} loss {loss:.6f} "
                         "L3D {L3D:.4f} L2D {L2D:.4f} Lvis {Lvis:.4f} "
