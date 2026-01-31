@@ -78,18 +78,22 @@ def build_uv_grid(H, W):
 
 
 def encode_once(model, meta, images):
-    return model.encoder(meta, images)
+    with torch.no_grad(), torch.cuda.amp.autocast(enabled=True):
+        return model.encoder(meta, images)
 
 
 def decode_queries(model, meta, images, global_features, queries, batch_size=4096):
     queries = queries.to(images.device)  # 确保 queries 和 images 在同一设备上
     outputs = []
-    for i in range(0, queries.shape[1], batch_size):
-        q = queries[:, i : i + batch_size]
-        q_embed = model.query_embed(meta, q, images)
-        pred = model.decoder(q_embed, global_features)
-        outputs.append(pred)
-    return torch.cat(outputs, dim=1)  # (B, N, 13)
+    with torch.no_grad(), torch.cuda.amp.autocast(enabled=True):
+        for i in range(0, queries.shape[1], batch_size):
+            q = queries[:, i : i + batch_size]
+            q_embed = model.query_embed(meta, q, images)
+            pred = model.decoder(q_embed, global_features)
+            outputs.append(pred.cpu())  # 立即移到 CPU 释放显存
+            del q_embed, pred
+        torch.cuda.empty_cache()
+    return torch.cat(outputs, dim=1).to(images.device)  # (B, N, 13)
 
 
 def predict_track(model, meta, images, global_features, u, v, t_src, batch_size=4096):
@@ -116,8 +120,10 @@ def predict_depth_maps(model, meta, images, global_features, batch_size=4096, ou
         t_cam = torch.full((uv.shape[0], 1), float(t))
         q = torch.cat([uv, t_src, t_tgt, t_cam], dim=-1).unsqueeze(0)
         preds = decode_queries(model, meta, images, global_features, q, batch_size=batch_size)
-        z = preds[0, :, 2].reshape(H, W)
+        z = preds[0, :, 2].reshape(H, W).cpu()  # 立即移到 CPU
         depth_maps.append(z)
+        del preds
+        torch.cuda.empty_cache()
     return torch.stack(depth_maps, dim=0)
 
 
